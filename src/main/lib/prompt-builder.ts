@@ -8,9 +8,13 @@ const SYSTEM_PREFIX =
   "Premium macOS app icon artwork, centered composition, single object only, " +
   "no text, no letters, no UI mockup, " +
   "clean cohesive background, " +
-  "object fills the square canvas naturally, " +
+  "opaque square artwork with background extending to every edge, " +
+  "keep the complete subject comfortably inside the central 80 percent of the canvas, " +
+  "keep important details out of the corners for later masking, " +
   "NO rounded rectangle container, NO squircle, NO icon plate, " +
   "NO app icon frame, NO border, NO bezel, NO tile background, " +
+  "NO outer drop shadow, NO transparent padding, NO empty margins, " +
+  "the app will add the icon silhouette, margins and outer shadow after generation, " +
   "background is part of the artwork itself, not a separate shape or container, " +
   "balanced full-canvas composition, " +
   "minimalistic, clean, high contrast, " +
@@ -28,6 +32,7 @@ export const NEGATIVE_PROMPT =
   "border, bezel, tile, plate, inset shape, background card, " +
   "floating tile, glossy badge, app store icon style, " +
   "UI frame, rounded corners, framed object, " +
+  "outer drop shadow, transparent padding, empty margins, " +
   "text, letters, watermark, multiple objects, clutter, " +
   "blurry, noisy, distorted, photorealistic photo";
 

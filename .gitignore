@@ -3,6 +3,7 @@ node_modules/
 
 # Local environment.
 .env
+.mobrowser/
 
 # Build output.
 build/

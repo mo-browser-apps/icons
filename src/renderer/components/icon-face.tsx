@@ -20,16 +20,15 @@ export function IconFace({
   /** Stroke width in the 0–100 viewBox. */
   squircleEdgeWidth?: string
 }) {
+  // Finished artwork already includes its mask and shadow. UI decoration must
+  // not add an edge or another shadow that will be absent from the saved file.
+  if (src) {
+    return <img src={src} alt="Generated icon" className="absolute inset-0 w-full h-full object-contain" draggable={false} />
+  }
+
   return (
     <>
-      {src ? (
-        <img
-          src={src}
-          alt="Generated icon"
-          className="absolute inset-0 w-full h-full object-cover"
-          draggable={false}
-        />
-      ) : state === "generated" ? (
+      {state === "generated" ? (
         <>
           <div className="absolute inset-0 bg-linear-to-br from-violet-600 via-indigo-500 to-blue-400" />
           <div

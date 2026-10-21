@@ -1,0 +1,46 @@
+<!-- Deterministic artwork for export checks; this is not an image-model sample. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="background" cx="50%" cy="0%" r="100%">
+      <stop stop-color="#366655"/><stop offset="0.55" stop-color="#143b2f"/><stop offset="1" stop-color="#09251e"/>
+    </radialGradient>
+    <radialGradient id="petal" cx="35%" cy="20%" r="85%">
+      <stop stop-color="#fff0f0"/><stop offset="0.45" stop-color="#f4bacd"/><stop offset="1" stop-color="#c66d91"/>
+    </radialGradient>
+    <radialGradient id="inner" cx="30%" cy="15%" r="90%">
+      <stop stop-color="#fff5ee"/><stop offset="0.55" stop-color="#f5cad4"/><stop offset="1" stop-color="#d48ca7"/>
+    </radialGradient>
+    <linearGradient id="leaf" x2="1" y2="1">
+      <stop stop-color="#a8cb8a"/><stop offset="0.55" stop-color="#5b966b"/><stop offset="1" stop-color="#2e664a"/>
+    </linearGradient>
+    <radialGradient id="gold" cx="35%" cy="25%" r="80%">
+      <stop stop-color="#fff5be"/><stop offset="0.45" stop-color="#ebc96a"/><stop offset="1" stop-color="#b78b32"/>
+    </radialGradient>
+    <filter id="depth" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#071c17" flood-opacity="0.3"/>
+    </filter>
+    <ellipse id="outer-petal" cx="512" cy="345" rx="104" ry="166" fill="url(#petal)"/>
+    <ellipse id="inner-petal" cx="512" cy="391" rx="70" ry="110" fill="url(#inner)"/>
+  </defs>
+  <path fill="url(#background)" d="M0 0H1024V1024H0Z"/>
+  <g filter="url(#depth)">
+    <path fill="url(#leaf)" d="M504 722C409 558 285 591 253 663C285 794 402 826 504 722Z"/>
+    <path fill="url(#leaf)" d="M520 716C554 580 708 559 769 618C751 755 629 817 520 716Z"/>
+    <path d="M512 802C500 709 513 614 512 501" fill="none" stroke="#88af77" stroke-width="19" stroke-linecap="round"/>
+    <g filter="url(#depth)">
+      <use href="#outer-petal"/><use href="#outer-petal" transform="rotate(72 512 480)"/>
+      <use href="#outer-petal" transform="rotate(144 512 480)"/><use href="#outer-petal" transform="rotate(216 512 480)"/>
+      <use href="#outer-petal" transform="rotate(288 512 480)"/>
+    </g>
+    <g filter="url(#depth)" transform="rotate(36 512 480)">
+      <use href="#inner-petal"/><use href="#inner-petal" transform="rotate(72 512 480)"/>
+      <use href="#inner-petal" transform="rotate(144 512 480)"/><use href="#inner-petal" transform="rotate(216 512 480)"/>
+      <use href="#inner-petal" transform="rotate(288 512 480)"/>
+    </g>
+    <circle cx="512" cy="480" r="66" fill="url(#gold)"/>
+    <g fill="#fff1b2" opacity="0.7">
+      <circle cx="487" cy="458" r="6"/><circle cx="515" cy="450" r="5"/><circle cx="538" cy="467" r="6"/>
+      <circle cx="509" cy="480" r="7"/><circle cx="483" cy="490" r="5"/><circle cx="524" cy="506" r="5"/>
+    </g>
+  </g>
+</svg>

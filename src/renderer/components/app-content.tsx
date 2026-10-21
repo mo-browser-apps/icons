@@ -24,7 +24,7 @@ export function AppContent() {
   const [attachments, setAttachments] = useState<string[]>([])
   const [selectedVariant, setSelectedVariant] = useState<number | null>(null)
   const [baseIconSrc, setBaseIconSrc] = useState<string | null>(null)
-  // Unmasked square version of baseIconSrc, used when writing the .icns file.
+  // Original artwork for model edits; baseIconSrc is the finished export PNG.
   const [rawBaseIconSrc, setRawBaseIconSrc] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<{ folderPath: string; icnsPath: string } | null>(
@@ -101,7 +101,7 @@ export function AppContent() {
     setIconState("generating")
     // In refine mode the confirmed variant is the reference; otherwise use the
     // user-attached image (if any).
-    const referenceImage = iconState === "refine" ? (baseIconSrc ?? attachments[0]) : attachments[0]
+    const referenceImage = iconState === "refine" ? (rawBaseIconSrc ?? attachments[0]) : attachments[0]
     pipeline.generate(prompt, referenceImage)
   }
 
@@ -122,21 +122,19 @@ export function AppContent() {
   }
 
   const handleSave = async () => {
-    // Use the unmasked square image for the .icns file.  macOS applies its own
-    // squircle clip when rendering app icons in the Dock and Cmd+Tab; saving a
-    // pre-masked image (with transparent corners) causes the OS to put a gray
-    // background plate behind the icon and shrink it to ~50%.
-    const rawSrc =
+    // Export exactly the prepared PNG shown in the preview, including alpha,
+    // inset and shadow. No reliance on an OS-provided mask in Finder or DMG.
+    const preparedSrc =
       iconState === "refine"
-        ? rawBaseIconSrc
+        ? baseIconSrc
         : selectedVariant !== null
-          ? pipeline.rawVariants[selectedVariant]
+          ? pipeline.variants[selectedVariant]
           : null
-    if (!rawSrc) return
+    if (!preparedSrc) return
 
     try {
       // Fetch the object URL and convert to Uint8Array for IPC transfer.
-      const response = await fetch(rawSrc)
+      const response = await fetch(preparedSrc)
       const buffer = await response.arrayBuffer()
       const imageData = new Uint8Array(buffer)
       const saved = await ipc.app.SaveIcon({ imageData })
@@ -184,7 +182,7 @@ export function AppContent() {
     startGeneration()
   }
 
-  const canSave = iconState === "refine" && rawBaseIconSrc != null
+  const canSave = iconState === "refine" && baseIconSrc != null
 
   const showStatus =
     pipeline.status === "downloading" && pipeline.progress.label !== ""

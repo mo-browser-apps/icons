@@ -1,6 +1,7 @@
 import './sentry';
 import { app, BrowserWindow, workspace, ipc, Menu, MenuItem, MenuWithRole, prefs, Theme } from '@mobrowser/api';
 import { exec } from 'node:child_process';
+import { preserveSmallIconAlpha } from './lib/icns-alpha';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -99,6 +100,7 @@ async function removeIcnsOutputs(icnsPath: string, iconsetDir: string): Promise<
   await fs.unlink(icnsPath).catch(() => {});
 }
 
+/** Resize the finished preview PNG, preserving its transparent margins and shadow. */
 async function buildIcnsAt(imageData: Buffer, iconsetDir: string, icnsPath: string): Promise<void> {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'moicons-'));
   const srcPng = path.join(tmp, 'icon_1024.png');
@@ -111,6 +113,12 @@ async function buildIcnsAt(imageData: Buffer, iconsetDir: string, icnsPath: stri
       );
     }
     await run(`iconutil -c icns "${iconsetDir}" --output "${icnsPath}"`);
+    const [icns, png16, png32] = await Promise.all([
+      fs.readFile(icnsPath),
+      fs.readFile(path.join(iconsetDir, 'icon_16x16.png')),
+      fs.readFile(path.join(iconsetDir, 'icon_32x32.png')),
+    ]);
+    await fs.writeFile(icnsPath, preserveSmallIconAlpha(icns, png16, png32));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
