@@ -17,7 +17,8 @@ message SetUnsavedIconStateRequest {
 }
 
 message SaveIconRequest {
-  // 1024×1024 PNG bytes with squircle mask pre-applied.
+  // Finished 1024×1024 PNG shown in preview: macOS 15 contour, transparent
+  // margins and outer shadow included. Never send the raw model artwork.
   bytes image_data = 1;
 }
 
@@ -36,14 +37,17 @@ message ShowPathInFinderRequest {
 message GenerateIconRequest {
   string prompt = 1;
   string negative_prompt = 2;
-  // Base64-encoded PNG, no data URL prefix. Empty = no reference image.
+  // Original artwork as base64-encoded PNG, no data URL prefix.
+  // Refinement uses the raw variant without export mask, margins or shadow.
+  // Empty = no reference image.
   string reference_image = 3;
   // Seed for reproducibility. 0 = pick automatically.
   int32 seed = 4;
 }
 
 message GenerateIconResponse {
-  // Base64-encoded PNG images, no data URL prefix.
+  // Full-bleed artwork as base64-encoded images, no data URL prefix.
+  // The renderer applies export styling and retains these originals for edits.
   repeated string images = 1;
   string error = 2;
 }

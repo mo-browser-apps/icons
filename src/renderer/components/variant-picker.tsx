@@ -1,9 +1,5 @@
 import { IconFace } from "@/components/icon-face"
-import {
-  ICON_CLIP_FILTER_BASE,
-  SQUICLE_PATH_100,
-  appIconShapeClip,
-} from "@/components/squircle"
+import { ICON_BODY_SIZE, ICON_SIZE, MACOS_ICON_PATH } from "@/lib/icon-geometry"
 
 export function VariantPicker({
   selected,
@@ -16,11 +12,11 @@ export function VariantPicker({
 }) {
   const iconPx = 144
   const selectionRingPx = 4
-  // Extra layout space so the stroke (centered on the path) is not clipped at the squircle extrema.
+  // Keep the artwork body at the original UI size; its transparent canvas and
+  // shadow extend into the gap. The image itself is never clipped or filtered.
   const cellPx = iconPx + selectionRingPx
-  const vbPad = (selectionRingPx / 2) * (100 / iconPx)
-  const viewBoxVb = `${-vbPad} ${-vbPad} ${100 + 2 * vbPad} ${100 + 2 * vbPad}`
-  const ringStrokeVb = String((selectionRingPx * 100) / iconPx)
+  const canvasPx = iconPx * ICON_SIZE / ICON_BODY_SIZE
+  const ringStrokeVb = selectionRingPx * ICON_SIZE / canvasPx
 
   return (
     <div className="flex gap-8">
@@ -31,54 +27,38 @@ export function VariantPicker({
           <button
             key={i}
             onClick={() => onSelect(i)}
+            disabled={!src}
+            aria-label={`Variant ${i + 1}`}
+            aria-pressed={isSelected}
             className="group relative flex items-center justify-center overflow-visible rounded-none focus:outline-none"
             type="button"
             style={{
               width: cellPx,
               height: cellPx,
-              filter: ICON_CLIP_FILTER_BASE,
             }}
           >
             <div
-              className="relative z-0 shrink-0 overflow-hidden"
+              className="relative z-0 shrink-0"
               style={{
-                width: iconPx,
-                height: iconPx,
-                ...appIconShapeClip,
+                width: canvasPx,
+                height: canvasPx,
               }}
             >
-              <IconFace state="generated" src={src} />
+              {src && <IconFace state="generated" src={src} />}
             </div>
-            {!isSelected && (
+            {src && (
               <svg
-                className="pointer-events-none absolute inset-0 z-10 h-full w-full overflow-visible opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                viewBox={viewBoxVb}
-                preserveAspectRatio="none"
+                className={`pointer-events-none absolute z-10 overflow-visible transition-opacity duration-150 ${isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"}`}
+                width={canvasPx}
+                height={canvasPx}
+                viewBox={`0 0 ${ICON_SIZE} ${ICON_SIZE}`}
                 overflow="visible"
                 aria-hidden
               >
                 <path
-                  d={SQUICLE_PATH_100}
+                  d={MACOS_ICON_PATH}
                   fill="none"
-                  stroke="rgb(156, 163, 175)"
-                  strokeWidth={ringStrokeVb}
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-              </svg>
-            )}
-            {isSelected && (
-              <svg
-                className="pointer-events-none absolute inset-0 z-10 h-full w-full overflow-visible"
-                viewBox={viewBoxVb}
-                preserveAspectRatio="none"
-                overflow="visible"
-                aria-hidden
-              >
-                <path
-                  d={SQUICLE_PATH_100}
-                  fill="none"
-                  stroke="white"
+                  stroke={isSelected ? "white" : "rgb(156, 163, 175)"}
                   strokeWidth={ringStrokeVb}
                   strokeLinejoin="round"
                   strokeLinecap="round"

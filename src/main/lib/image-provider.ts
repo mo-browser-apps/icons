@@ -18,8 +18,8 @@ export interface GenerationRequest {
 
 export interface GenerationResult {
   /**
-   * Base64-encoded PNG strings with the squircle mask pre-applied.
-   * No data URL prefix — compatible with the existing IPC contract.
+   * Base64-encoded full-bleed artwork, with no data URL prefix.
+   * The renderer prepares the macOS mask, inset and shadow after generation.
    */
   images: string[];
 }

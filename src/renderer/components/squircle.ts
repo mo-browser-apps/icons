@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react"
 
-// Lamé / superellipse "squircle" (continuous curvature), much closer to the
-// iOS/macOS app icon mask than a simple rounded rect (circular fillets).
+// Decorative shape for the idle/loading stack only. Generated icons and their
+// selection outline use the Sequoia geometry in lib/icon-geometry.ts.
 const SQUIRCLE_N = 3.2
 const SQUICLE_STEPS = 72
 
