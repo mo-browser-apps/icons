@@ -23,7 +23,7 @@ Quitting with an unsaved icon triggers a confirmation dialog.
 
 - macOS 14 (Apple Silicon) or later.
 - [Node.js](https://nodejs.org/en/download/) 24.14.1 (LTS) or later.
-- [MōBrowser](https://teamdev.com/mobrowser/) 2.13.0 or later.
+- [MōBrowser](https://teamdev.com/mobrowser/) 2.19.0 or later.
 
 ## Setup
 
