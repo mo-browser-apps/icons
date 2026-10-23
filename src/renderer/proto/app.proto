@@ -71,6 +71,10 @@ message SetOpenAIApiKeyResponse {
   GetGenerationSettingsResponse settings = 2;
 }
 
+message RemoveApiKeyResponse {
+  string error = 1;
+}
+
 message GetStoredOpenAIApiKeyRequest {}
 
 message GetStoredOpenAIApiKeyResponse {
@@ -139,6 +143,7 @@ service AppService {
   rpc GetOpenAIApiKeyStatus(GetOpenAIApiKeyStatusRequest) returns (GetOpenAIApiKeyStatusResponse);
   rpc GetStoredOpenAIApiKey(GetStoredOpenAIApiKeyRequest) returns (GetStoredOpenAIApiKeyResponse);
   rpc SetOpenAIApiKey(SetOpenAIApiKeyRequest) returns (SetOpenAIApiKeyResponse);
+  rpc RemoveApiKey(google.protobuf.Empty) returns (RemoveApiKeyResponse);
   rpc OpenExternalUrl(OpenExternalUrlRequest) returns (google.protobuf.Empty);
   rpc PickReferenceImage(PickReferenceImageRequest) returns (PickReferenceImageResponse);
 }

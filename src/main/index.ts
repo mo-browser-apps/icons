@@ -30,7 +30,7 @@ import { buildPrompt } from './lib/prompt-builder';
 import { getProvider, resolveProviderName } from './lib/image-provider';
 import { getImageSettings, saveImageSettings } from './lib/generation-settings';
 import { listImageModels, ProviderRequestError } from './lib/image-models';
-import { saveValidatedApiKey } from './lib/api-key-settings';
+import { removeStoredApiKey, saveValidatedApiKey } from './lib/api-key-settings';
 import {
   getResolvedApiKey,
   hasApiKeyInPrefs,
@@ -483,6 +483,15 @@ ipc.registerService(AppServiceDescriptor, {
       return { error: '', settings };
     } catch (err) {
       return { error: err instanceof Error ? err.message : 'Could not check the API key. Try again.', settings: undefined };
+    }
+  },
+
+  async RemoveApiKey() {
+    try {
+      removeStoredApiKey();
+      return { error: '' };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Could not remove the API key. Try again.' };
     }
   },
 });

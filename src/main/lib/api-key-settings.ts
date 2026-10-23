@@ -3,6 +3,17 @@ import { getImageSettings } from "./generation-settings";
 import { listImageModels } from "./image-models";
 import { API_KEY_PREFS_KEY, detectProviderFromKey } from "./openai-api-key";
 
+/** Disconnect locally while retaining each provider's model preferences. */
+export function removeStoredApiKey(): void {
+  if (!prefs.hasString(API_KEY_PREFS_KEY)) return;
+  const previousKey = prefs.getString(API_KEY_PREFS_KEY);
+  prefs.remove(API_KEY_PREFS_KEY);
+  if (!prefs.persist()) {
+    prefs.setString(API_KEY_PREFS_KEY, previousKey);
+    throw new Error("Could not remove the API key. Your saved key has been kept. Try again.");
+  }
+}
+
 /** Validate using read-only requests before replacing any saved preferences. */
 export async function saveValidatedApiKey(input: string) {
   const apiKey = input.trim();

@@ -29,8 +29,10 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
     persist: () => { writes++; return persist; },
   };
   const load = mainLoader({ prefs, fetch, env });
+  const apiKeys = load(fileURLToPath(new URL("../src/main/lib/api-key-settings.ts", import.meta.url)));
   return {
-    save: load(fileURLToPath(new URL("../src/main/lib/api-key-settings.ts", import.meta.url))).saveValidatedApiKey,
+    save: apiKeys.saveValidatedApiKey,
+    remove: apiKeys.removeStoredApiKey,
     values, writes: () => writes,
   };
 }
@@ -49,6 +51,29 @@ test("OpenAI validates through the authenticated model list, then preserves a su
   assert.equal(result.hasApiKey, true);
   assert.equal(app.values.get(keyPref), "sk-test");
   assert.equal(app.writes(), 1);
+});
+
+test("removing a key disconnects locally while preserving model choices and other preferences", () => {
+  for (const key of ["sk-test", "sk-or-test"]) {
+    const remaining = {
+      "imageGeneration.openai": { model: defaultModel, quality: "high" },
+      "imageGeneration.openrouter": { model: "example/image", quality: "" },
+      "ui.theme": "dark",
+    };
+    const app = subject(async () => { throw new Error("removal must not contact the provider"); }, { ...remaining, [keyPref]: key });
+    app.remove();
+    assert.deepEqual(Object.fromEntries(app.values), remaining);
+    assert.equal(app.writes(), 1);
+    app.remove();
+    assert.equal(app.writes(), 1);
+  }
+});
+
+test("failed key removal restores the saved key and model choices", () => {
+  const initial = { [keyPref]: "sk-test", "imageGeneration.openai": { model: defaultModel, quality: "high" } };
+  const app = subject(async () => { throw new Error("no request expected"); }, initial, false);
+  assert.throws(() => app.remove(), /Could not remove the API key/);
+  assert.deepEqual(Object.fromEntries(app.values), initial);
 });
 
 test("authentication, permission, rate-limit, service and connection failures keep the old key", async () => {
