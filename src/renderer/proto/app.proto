@@ -46,8 +46,8 @@ message GenerateIconRequest {
 }
 
 message GenerateIconResponse {
-  // Full-bleed artwork as base64-encoded images, no data URL prefix.
-  // The renderer applies export styling and retains these originals for edits.
+  // Full-bleed PNG, JPEG, or WebP artwork as base64, no data URL prefix.
+  // The renderer normalizes to PNG, applies export styling, and keeps originals for edits.
   repeated string images = 1;
   string error = 2;
 }

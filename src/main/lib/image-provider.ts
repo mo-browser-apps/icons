@@ -18,8 +18,8 @@ export interface GenerationRequest {
 
 export interface GenerationResult {
   /**
-   * Base64-encoded full-bleed artwork, with no data URL prefix.
-   * The renderer prepares the macOS mask, inset and shadow after generation.
+   * Base64-encoded PNG, JPEG, or WebP artwork, with no data URL prefix.
+   * The renderer normalizes to PNG and prepares the macOS mask, inset and shadow.
    */
   images: string[];
 }

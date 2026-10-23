@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react"
 import { ipc } from "@/gen/ipc"
 import { prepareIcon } from "./prepare-icon"
+import { generatedImageToPngDataURL, imageUrlToPngBase64 } from "./image-normalization"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -27,26 +28,6 @@ export interface IconPipeline {
   rawVariants: (string | null)[]
   generate: (prompt: string, referenceDataUrl?: string) => void
   cancel: () => void
-}
-
-// Reference image normalization.
-
-async function imageUrlToPngBase64(url: string): Promise<string> {
-  const bitmap = await createImageBitmap(await fetch(url).then((r) => r.blob()))
-  try {
-    const canvas = document.createElement("canvas")
-    canvas.width = bitmap.width
-    canvas.height = bitmap.height
-    const ctx = canvas.getContext("2d")
-    if (!ctx) throw new Error("Could not create a canvas rendering context.")
-    ctx.drawImage(bitmap, 0, 0)
-    const dataUrl = canvas.toDataURL("image/png")
-    const comma = dataUrl.indexOf(",")
-    if (comma < 0) throw new Error("Could not encode the reference image.")
-    return dataUrl.slice(comma + 1)
-  } finally {
-    bitmap.close()
-  }
 }
 
 // ── Hook ───────────────────────────────────────────────────────────────────
@@ -100,7 +81,8 @@ export function useIconPipeline(): IconPipeline {
       const newVariants: (string | null)[] = [null, null, null]
       const newRawVariants: (string | null)[] = [null, null, null]
       for (let i = 0; i < Math.min(response.images.length, 3); i++) {
-        const raw = `data:image/png;base64,${response.images[i]}`
+        const raw = await generatedImageToPngDataURL(response.images[i])
+        if (!isCurrent()) return
         newRawVariants[i] = raw
         newVariants[i] = await prepareIcon(raw)
         if (!isCurrent()) return

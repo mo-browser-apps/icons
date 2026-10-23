@@ -55,14 +55,21 @@ function isRetryableError(error: unknown): boolean {
   return error.status === 408 || error.status === 429 || error.status >= 500;
 }
 
-/** The renderer expects raw base64 PNG artwork from the Images API. */
+/** Accept raster artwork; the renderer normalizes it to PNG for edits/export. */
 function extractImageB64(json: ImageResponse): string | null {
-  if (!Array.isArray(json.data)) return null;
-  const image = json.data.find((item) =>
-    typeof item?.b64_json === "string" && item.b64_json.startsWith("iVBORw0KGgo") &&
-    (!item.media_type || item.media_type === "image/png")
-  );
-  return image?.b64_json ?? null;
+  if (!Array.isArray(json?.data)) return null;
+  for (const item of json.data) {
+    if (typeof item?.b64_json !== "string") continue;
+    const bytes = Buffer.from(item.b64_json, "base64");
+    const mime = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      ? "image/png"
+      : bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+        ? "image/jpeg"
+        : bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP"
+          ? "image/webp" : null;
+    if (mime && (!item.media_type || item.media_type === mime)) return item.b64_json;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,15 +131,15 @@ export class OpenRouterProvider implements ImageProvider {
     return { images };
   }
 
-  /** Generate or refine a single PNG through the Images API. */
-  private generateOne(
+  /** Generate or refine a single raster image through the Images API. */
+  private async generateOne(
     apiKey: string,
     settings: ImageSettings,
     providers: string[],
     prompt: string,
     referenceB64?: string
   ): Promise<string> {
-    return withRetry(async () => {
+    const body = await withRetry(async () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -167,17 +174,22 @@ export class OpenRouterProvider implements ImageProvider {
           throw new OpenRouterHttpError(res.status, body);
         }
 
-        const json = (await res.json()) as ImageResponse;
-        const image = extractImageB64(json);
-        if (!image) {
-          throw new Error(
-            "OpenRouter returned no PNG image. Ensure the selected model supports PNG output."
-          );
-        }
-        return image;
+        return await res.text();
       } finally {
         clearTimeout(timeoutId);
       }
     }, MAX_RETRIES, 1_000, isRetryableError);
+
+    // A successful response may already be billed. Parsing/format failures must
+    // not cause another generation request.
+    let json: ImageResponse;
+    try {
+      json = JSON.parse(body) as ImageResponse;
+    } catch {
+      throw new Error("OpenRouter returned an invalid image response.");
+    }
+    const image = extractImageB64(json);
+    if (!image) throw new Error("OpenRouter returned no supported image. Choose a model that outputs PNG, JPEG, or WebP.");
+    return image;
   }
 }
