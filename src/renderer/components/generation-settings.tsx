@@ -67,8 +67,10 @@ export function GenerationSettings({ disabled, onManageKey }: {
     try {
       const response = await ipc.app.GetGenerationSettings({ refresh: true })
       setSettings(response)
-      const model = response.models.find((item) => item.id === draft.model || (!draft.model && item.id === response.model))
-      if (model) setDraft(defaultsFor(model, draft.quality || response.quality))
+      setDraft((latest) => {
+        const model = response.models.find((item) => item.id === latest.model || (!latest.model && item.id === response.model))
+        return model ? defaultsFor(model, latest.quality || response.quality) : latest
+      })
       setError(response.error)
     } catch {
       setError("Could not refresh models. Try again.")

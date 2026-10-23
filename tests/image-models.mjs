@@ -35,6 +35,18 @@ test("OpenRouter controls use advertised quality values", () => {
   assert.deepEqual(result.qualities, ["low", "high", "auto"]);
 });
 
+test("the icon catalog requires PNG when output formats are advertised", () => {
+  for (const formats of [["jpeg"], ["webp"], ["jpeg", "webp"], []]) {
+    assert.equal(routerModel(model({ supported_parameters: {
+      ...parameters, output_format: { type: "enum", values: formats },
+    } })), undefined);
+  }
+  assert.ok(routerModel(model({ supported_parameters: {
+    ...parameters, output_format: { type: "enum", values: ["jpeg", "png", "webp"] },
+  } })));
+  assert.ok(routerModel(model()));
+});
+
 test("unsupported settings are rejected before generation", () => {
   const flare = openAIModel("gpt-image-2.5-flare");
   const settings = { model: flare.id, quality: "low" };
@@ -54,6 +66,23 @@ test("quality and editing support must coexist on one OpenRouter endpoint", asyn
   try {
     assert.deepEqual(await compatibleRouterProviders({ model: "example/image", quality: "low" }), ["fast"]);
     await assert.rejects(compatibleRouterProviders({ model: "example/image", quality: "high" }), /No provider supports/);
+  } finally { globalThis.fetch = originalFetch }
+});
+
+test("OpenRouter routing excludes endpoints that advertise only non-PNG formats", async () => {
+  const originalFetch = globalThis.fetch;
+  const endpoint = (provider_tag, formats) => ({ provider_tag, supported_parameters: {
+    ...parameters,
+    ...(formats === undefined ? {} : { output_format: { type: "enum", values: formats } }),
+  } });
+  const incompatible = [endpoint("jpeg-only", ["jpeg"]), endpoint("webp-only", ["webp"])];
+  globalThis.fetch = async () => Response.json({ endpoints: [
+    ...incompatible, endpoint("png", ["png", "jpeg"]), endpoint("unspecified"),
+  ] });
+  try {
+    assert.deepEqual(await compatibleRouterProviders({ model: "example/image", quality: "" }), ["png", "unspecified"]);
+    globalThis.fetch = async () => Response.json({ endpoints: incompatible });
+    await assert.rejects(compatibleRouterProviders({ model: "example/image", quality: "" }), /No provider supports/);
   } finally { globalThis.fetch = originalFetch }
 });
 

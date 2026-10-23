@@ -35,7 +35,9 @@ const values = (cap?: Capability): string[] =>
 
 function supportsIconWorkflow(parameters: Parameters): boolean {
   const references = parameters.input_references;
+  const formats = parameters.output_format?.values;
   return values(parameters.aspect_ratio).includes("1:1") &&
+    (!Array.isArray(formats) || formats.includes("png")) &&
     references?.type === "range" && references.min === 0 &&
     (references.max ?? 0) >= 1;
 }
