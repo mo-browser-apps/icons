@@ -85,6 +85,9 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
 
   const selected = settings?.models.find((model) => model.id === draft.model)
   const current = settings?.models.find((model) => model.id === settings.model)
+  // Model results are only returned after the provider accepts the saved key.
+  const canRemoveKey = !!settings?.apiKeyRequired && settings.hasApiKey &&
+    settings.models.length > 0 && !settings.error
   const close = () => {
     if (saving) return
     requestVersion.current++
@@ -158,7 +161,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
     } finally { setSaving(false) }
   }
   const removeKey = async () => {
-    if (saving || !settings?.hasApiKey) return
+    if (saving || !settings || !canRemoveKey) return
     const version = ++requestVersion.current
     setSaving(true)
     setError("")
@@ -245,7 +248,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="underline underline-offset-4 hover:text-foreground">OpenAI</button>
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://openrouter.ai/keys" }).catch(() => {})} className="underline underline-offset-4 hover:text-foreground">OpenRouter</button>
               </div>
-              {settings?.hasApiKey && <button type="button" disabled={saving} onClick={() => { setError(""); setStep("remove") }} className="mt-4 text-xs text-red-400 hover:text-red-300 disabled:opacity-50">Remove API key</button>}
+              {canRemoveKey && <button type="button" disabled={saving} onClick={() => { setError(""); setStep("remove") }} className="mt-4 text-xs text-red-400 hover:text-red-300 disabled:opacity-50">Remove API key</button>}
             </div> : <>
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -289,7 +292,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
             {step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
               : step === "key" ? settings?.hasApiKey ? <button type="button" disabled={saving} onClick={() => { setApiKey(""); setShowKey(false); setError(settings.error); setStep("models") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button> : <span />
               : settings?.apiKeyRequired ? <button type="button" disabled={saving} onClick={editKey} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">API key</button> : <span />}
-            <button type="submit" disabled={saving || (step === "remove" ? !settings?.hasApiKey : step === "key" ? !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
+            <button type="submit" disabled={saving || (step === "remove" ? !canRemoveKey : step === "key" ? !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
               {step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
             </button>
           </div>
