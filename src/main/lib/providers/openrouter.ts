@@ -5,25 +5,21 @@ import type {
 } from "../image-provider";
 import { withRetry } from "../image-provider";
 import { getResolvedApiKey } from "../openai-api-key";
+import { getImageSettings } from "../generation-settings";
+import { compatibleRouterProviders, DEFAULT_OPENROUTER_MODEL, type ImageSettings } from "../image-models";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
-
-/**
- * Default image model. "Nano Banana" — supports text-to-image, image editing
- * (reference image), and 1:1 aspect ratio. Override with OPENROUTER_MODEL.
- */
-const DEFAULT_MODEL = "google/gemini-2.5-flash-image";
+const IMAGES_URL = "https://openrouter.ai/api/v1/images";
 
 /** Optional attribution headers OpenRouter shows on its activity dashboard. */
 const REFERER = "https://github.com/mo-browser-apps/icons";
 const TITLE = "MoIcons";
 
 /** Abort individual HTTP requests after this many milliseconds. */
-const REQUEST_TIMEOUT_MS = 90_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 
 /** How many times to retry a failed request before giving up. */
 const MAX_RETRIES = 3;
@@ -32,17 +28,10 @@ const MAX_RETRIES = 3;
 // Response shape (only the fields we read)
 // ---------------------------------------------------------------------------
 
-interface ChatImagePart {
-  type?: string;
-  image_url?: { url?: string };
-}
-
-interface ChatCompletionResponse {
-  choices?: Array<{
-    message?: {
-      images?: ChatImagePart[];
-      content?: string | ChatImagePart[];
-    };
+interface ImageResponse {
+  data?: Array<{
+    b64_json?: string;
+    media_type?: string;
   }>;
 }
 
@@ -66,32 +55,14 @@ function isRetryableError(error: unknown): boolean {
   return error.status === 408 || error.status === 429 || error.status >= 500;
 }
 
-/** Strip a `data:<mime>;base64,` prefix, returning the raw base64 payload. */
-function dataUrlToBase64(url: string): string {
-  const comma = url.indexOf(",");
-  return comma >= 0 ? url.slice(comma + 1) : url;
-}
-
-/**
- * Pull the first generated image out of an OpenRouter chat completion.
- * Images normally arrive in `message.images[].image_url.url` as a data URL,
- * but we also scan `message.content` defensively.
- */
-function extractImageB64(json: ChatCompletionResponse): string | null {
-  const message = json.choices?.[0]?.message;
-  if (!message) return null;
-
-  const fromImages = message.images?.find((p) => p?.image_url?.url)?.image_url?.url;
-  if (fromImages) return dataUrlToBase64(fromImages);
-
-  if (Array.isArray(message.content)) {
-    const fromContent = message.content.find(
-      (p) => p?.type === "image_url" && p.image_url?.url
-    )?.image_url?.url;
-    if (fromContent) return dataUrlToBase64(fromContent);
-  }
-
-  return null;
+/** The renderer expects raw base64 PNG artwork from the Images API. */
+function extractImageB64(json: ImageResponse): string | null {
+  if (!Array.isArray(json.data)) return null;
+  const image = json.data.find((item) =>
+    typeof item?.b64_json === "string" && item.b64_json.startsWith("iVBORw0KGgo") &&
+    (!item.media_type || item.media_type === "image/png")
+  );
+  return image?.b64_json ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,10 +72,8 @@ function extractImageB64(json: ChatCompletionResponse): string | null {
 /**
  * OpenRouter image generation provider.
  *
- * Unlike OpenAI's `/images/generations`, OpenRouter generates images through
- * the `/chat/completions` endpoint with `modalities: ["image", "text"]`, and
- * returns a single image per call. To produce `count` variants we fan out that
- * many requests in parallel.
+ * Uses OpenRouter's dedicated `/images` endpoint. Request
+ * each variant separately so successful images survive a partial failure.
  *
  * API key: read from application preferences only (an `sk-or-…` key).
  */
@@ -117,7 +86,8 @@ export class OpenRouterProvider implements ImageProvider {
       );
     }
 
-    const model = process.env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL;
+    const settings = getImageSettings("openrouter");
+    const providers = await compatibleRouterProviders(settings);
     const count = Math.max(1, request.count);
 
     // One image per request → fire `count` requests concurrently.
@@ -125,7 +95,8 @@ export class OpenRouterProvider implements ImageProvider {
       Array.from({ length: count }, () =>
         this.generateOne(
           apiKey,
-          model,
+          settings,
+          providers,
           request.positivePrompt,
           request.referenceImageB64
         )
@@ -153,10 +124,11 @@ export class OpenRouterProvider implements ImageProvider {
     return { images };
   }
 
-  /** Generate a single image via one chat-completion request. */
+  /** Generate or refine a single PNG through the Images API. */
   private generateOne(
     apiKey: string,
-    model: string,
+    settings: ImageSettings,
+    providers: string[],
     prompt: string,
     referenceB64?: string
   ): Promise<string> {
@@ -165,17 +137,7 @@ export class OpenRouterProvider implements ImageProvider {
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
       try {
-        // For an edit, the reference image precedes the text instruction.
-        const content: ChatImagePart[] | Array<Record<string, unknown>> = [];
-        if (referenceB64) {
-          content.push({
-            type: "image_url",
-            image_url: { url: `data:image/png;base64,${referenceB64}` },
-          });
-        }
-        content.push({ type: "text", text: prompt });
-
-        const res = await fetch(CHAT_COMPLETIONS_URL, {
+        const res = await fetch(IMAGES_URL, {
           method: "POST",
           signal: controller.signal,
           headers: {
@@ -185,11 +147,18 @@ export class OpenRouterProvider implements ImageProvider {
             "X-Title": TITLE,
           },
           body: JSON.stringify({
-            model,
-            modalities: ["image", "text"],
-            // Icons must be square; pin the aspect ratio.
-            image_config: { aspect_ratio: "1:1" },
-            messages: [{ role: "user", content }],
+            model: settings.model,
+            prompt,
+            n: 1,
+            aspect_ratio: "1:1",
+            output_format: "png",
+            ...(settings.model === DEFAULT_OPENROUTER_MODEL ? { resolution: "1K" } : {}),
+            ...(settings.quality ? { quality: settings.quality } : {}),
+            ...(providers.length ? { provider: { only: providers } } : {}),
+            ...(referenceB64 ? { input_references: [{
+              type: "image_url",
+              image_url: { url: `data:image/png;base64,${referenceB64}` },
+            }] } : {}),
           }),
         });
 
@@ -198,11 +167,11 @@ export class OpenRouterProvider implements ImageProvider {
           throw new OpenRouterHttpError(res.status, body);
         }
 
-        const json = (await res.json()) as ChatCompletionResponse;
+        const json = (await res.json()) as ImageResponse;
         const image = extractImageB64(json);
         if (!image) {
           throw new Error(
-            "OpenRouter returned no image. Ensure the selected model supports image output."
+            "OpenRouter returned no PNG image. Ensure the selected model supports PNG output."
           );
         }
         return image;

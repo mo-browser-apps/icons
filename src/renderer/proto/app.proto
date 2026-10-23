@@ -82,6 +82,34 @@ message OpenExternalUrlRequest {
   string url = 1;
 }
 
+message ImageModelOption {
+  string id = 1;
+  string name = 2;
+  repeated string qualities = 3;
+}
+
+message GetGenerationSettingsRequest {
+  bool refresh = 1;
+}
+
+message GetGenerationSettingsResponse {
+  string provider = 1;
+  string model = 2;
+  string quality = 3;
+  repeated ImageModelOption models = 4;
+  string error = 5;
+}
+
+message SetGenerationSettingsRequest {
+  string provider = 1;
+  string model = 2;
+  string quality = 3;
+}
+
+message SetGenerationSettingsResponse {
+  string error = 1;
+}
+
 message PickReferenceImageRequest {}
 
 message PickReferenceImageResponse {
@@ -102,6 +130,8 @@ service AppService {
   rpc SaveIcon(SaveIconRequest) returns (SaveIconResponse);
   rpc ShowPathInFinder(ShowPathInFinderRequest) returns (google.protobuf.Empty);
   rpc GenerateIcon(GenerateIconRequest) returns (GenerateIconResponse);
+  rpc GetGenerationSettings(GetGenerationSettingsRequest) returns (GetGenerationSettingsResponse);
+  rpc SetGenerationSettings(SetGenerationSettingsRequest) returns (SetGenerationSettingsResponse);
   rpc GetOpenAIApiKeyStatus(GetOpenAIApiKeyStatusRequest) returns (GetOpenAIApiKeyStatusResponse);
   rpc GetStoredOpenAIApiKey(GetStoredOpenAIApiKeyRequest) returns (GetStoredOpenAIApiKeyResponse);
   rpc SetOpenAIApiKey(SetOpenAIApiKeyRequest) returns (SetOpenAIApiKeyResponse);

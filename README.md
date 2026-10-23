@@ -2,7 +2,7 @@
 
 A simple desktop app for generating **macOS app icons** in the `*.icns` format with AI. You describe what you want, optionally attach a reference image, pick from several variants, refine the chosen design, then save a proper `*.icns` bundle and the `*.iconset` folder with all standard sizes.
 
-This app uses the [OpenAI API](https://openai.com/api/) for image generation.
+This app uses the [OpenAI API](https://openai.com/api/) or [OpenRouter](https://openrouter.ai/) for image generation. Defaults favor fast iteration: GPT Image 2.5 Flare at low quality for OpenAI, and Nano Banana 2 Lite for OpenRouter. Open generation settings beside the prompt to load available image models and choose quality. Choices are saved separately for each provider. OpenAI offers Low, Medium, High, and Auto; OpenRouter controls follow the selected model's capabilities. `OPENROUTER_MODEL` sets the initial OpenRouter model until you save a selection in the app.
 
 Here's a short video demonstrating the app in action:
 

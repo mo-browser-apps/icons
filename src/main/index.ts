@@ -8,6 +8,8 @@ import * as os from 'node:os';
 import {
   GenerateIconRequest,
   GenerateIconResponse,
+  GetGenerationSettingsRequest,
+  SetGenerationSettingsRequest,
   GetOpenAIApiKeyStatusRequest,
   GetOpenAIApiKeyStatusResponse,
   GetStoredOpenAIApiKeyRequest,
@@ -26,6 +28,8 @@ import {
 import { AppServiceDescriptor } from './gen/ipc_service';
 import { buildPrompt } from './lib/prompt-builder';
 import { getProvider, resolveProviderName } from './lib/image-provider';
+import { getImageSettings, saveImageSettings } from './lib/generation-settings';
+import { listImageModels } from './lib/image-models';
 import {
   getResolvedApiKey,
   hasApiKeyInPrefs,
@@ -434,6 +438,30 @@ ipc.registerService(AppServiceDescriptor, {
       openaiKeyRequired: resolveProviderName() !== 'mock',
       hasOpenaiKey: hasApiKeyInPrefs(),
     };
+  },
+
+  async GetGenerationSettings(request: GetGenerationSettingsRequest) {
+    const provider = resolveProviderName();
+    const settings = getImageSettings(provider);
+    try {
+      const models = await listImageModels(provider, getResolvedApiKey(), request.refresh);
+      return { provider, ...settings, models, error: '' };
+    } catch (err) {
+      return { provider, ...settings, models: [], error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  async SetGenerationSettings(request: SetGenerationSettingsRequest) {
+    try {
+      const provider = resolveProviderName();
+      if (request.provider !== provider) throw new Error('Your provider changed. Reopen generation settings.');
+      await saveImageSettings(provider, getResolvedApiKey(), {
+        model: request.model, quality: request.quality,
+      });
+      return { error: '' };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
   },
 
   async GetStoredOpenAIApiKey(

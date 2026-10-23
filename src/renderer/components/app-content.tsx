@@ -7,6 +7,7 @@ import {
   type OpenAIApiKeyManageReason,
 } from "@/components/openai-api-key-modals"
 import { PromptInput, type PrimaryAction } from "@/components/prompt-input"
+import { GenerationSettings } from "@/components/generation-settings"
 import { ErrorModal, generationErrorSuggestsApiKeyIssue } from "@/components/error-modal"
 import { SaveSuccessModal } from "@/components/save-success-modal"
 import { SquircleClipDefs } from "@/components/squircle-clip-defs"
@@ -32,6 +33,7 @@ export function AppContent() {
   )
   const [iconDirty, setIconDirty] = useState(false)
   const [openAIApiKeyStartupOpen, setOpenAIApiKeyStartupOpen] = useState(false)
+  const [settingsRevision, setSettingsRevision] = useState(0)
   const [openAIApiKeyManageReason, setOpenAIApiKeyManageReason] =
     useState<OpenAIApiKeyManageReason | null>(null)
   const resumeAfterCancelRef = useRef<ResumeAfterCancel>("idle")
@@ -215,7 +217,10 @@ export function AppContent() {
       )}
 
       {openAIApiKeyStartupOpen && (
-        <OpenAIApiKeyStartupModal onSaved={() => setOpenAIApiKeyStartupOpen(false)} />
+        <OpenAIApiKeyStartupModal onSaved={() => {
+          setOpenAIApiKeyStartupOpen(false)
+          setSettingsRevision((revision) => revision + 1)
+        }} />
       )}
       {openAIApiKeyManageReason !== null && (
         <OpenAIApiKeyManageModal
@@ -223,7 +228,10 @@ export function AppContent() {
           reason={openAIApiKeyManageReason}
           onClose={(saved) => {
             setOpenAIApiKeyManageReason(null)
-            if (saved) setOpenAIApiKeyStartupOpen(false)
+            if (saved) {
+              setOpenAIApiKeyStartupOpen(false)
+              setSettingsRevision((revision) => revision + 1)
+            }
           }}
         />
       )}
@@ -282,7 +290,11 @@ export function AppContent() {
           placeholder={inputPlaceholder}
           attachments={attachments}
           onAttachmentsChange={setAttachments}
-          onOpenApiKeySettings={() => setOpenAIApiKeyManageReason("settings")}
+          settingsControl={<GenerationSettings
+            key={settingsRevision}
+            disabled={iconState === "generating"}
+            onManageKey={() => setOpenAIApiKeyManageReason("settings")}
+          />}
         />
       </div>
     </div>
