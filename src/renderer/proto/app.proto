@@ -46,8 +46,8 @@ message GenerateIconRequest {
 }
 
 message GenerateIconResponse {
-  // Full-bleed artwork as base64-encoded images, no data URL prefix.
-  // The renderer applies export styling and retains these originals for edits.
+  // Full-bleed PNG, JPEG, or WebP artwork as base64, no data URL prefix.
+  // The renderer normalizes to PNG, applies export styling, and keeps originals for edits.
   repeated string images = 1;
   string error = 2;
 }
@@ -68,6 +68,11 @@ message SetOpenAIApiKeyRequest {
 message SetOpenAIApiKeyResponse {
   // Empty on success; otherwise a short error message for the user.
   string error = 1;
+  GetGenerationSettingsResponse settings = 2;
+}
+
+message RemoveApiKeyResponse {
+  string error = 1;
 }
 
 message GetStoredOpenAIApiKeyRequest {}
@@ -80,6 +85,37 @@ message GetStoredOpenAIApiKeyResponse {
 message OpenExternalUrlRequest {
   // https URL (or other scheme) to open in the system default handler.
   string url = 1;
+}
+
+message ImageModelOption {
+  string id = 1;
+  string name = 2;
+  repeated string qualities = 3;
+}
+
+message GetGenerationSettingsRequest {
+  bool refresh = 1;
+}
+
+message GetGenerationSettingsResponse {
+  string provider = 1;
+  string model = 2;
+  string quality = 3;
+  repeated ImageModelOption models = 4;
+  string error = 5;
+  bool has_api_key = 6;
+  bool api_key_required = 7;
+  string error_code = 8;
+}
+
+message SetGenerationSettingsRequest {
+  string provider = 1;
+  string model = 2;
+  string quality = 3;
+}
+
+message SetGenerationSettingsResponse {
+  string error = 1;
 }
 
 message PickReferenceImageRequest {}
@@ -102,9 +138,12 @@ service AppService {
   rpc SaveIcon(SaveIconRequest) returns (SaveIconResponse);
   rpc ShowPathInFinder(ShowPathInFinderRequest) returns (google.protobuf.Empty);
   rpc GenerateIcon(GenerateIconRequest) returns (GenerateIconResponse);
+  rpc GetGenerationSettings(GetGenerationSettingsRequest) returns (GetGenerationSettingsResponse);
+  rpc SetGenerationSettings(SetGenerationSettingsRequest) returns (SetGenerationSettingsResponse);
   rpc GetOpenAIApiKeyStatus(GetOpenAIApiKeyStatusRequest) returns (GetOpenAIApiKeyStatusResponse);
   rpc GetStoredOpenAIApiKey(GetStoredOpenAIApiKeyRequest) returns (GetStoredOpenAIApiKeyResponse);
   rpc SetOpenAIApiKey(SetOpenAIApiKeyRequest) returns (SetOpenAIApiKeyResponse);
+  rpc RemoveApiKey(google.protobuf.Empty) returns (RemoveApiKeyResponse);
   rpc OpenExternalUrl(OpenExternalUrlRequest) returns (google.protobuf.Empty);
   rpc PickReferenceImage(PickReferenceImageRequest) returns (PickReferenceImageResponse);
 }

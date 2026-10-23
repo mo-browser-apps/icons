@@ -5,6 +5,8 @@ import type {
 } from "../image-provider";
 import { withRetry } from "../image-provider";
 import { getResolvedOpenAIApiKey } from "../openai-api-key";
+import { getImageSettings } from "../generation-settings";
+import type { ImageSettings } from "../image-models";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -14,7 +16,7 @@ const GENERATIONS_URL = "https://api.openai.com/v1/images/generations";
 const EDITS_URL = "https://api.openai.com/v1/images/edits";
 
 /** Abort individual HTTP requests after this many milliseconds. */
-const REQUEST_TIMEOUT_MS = 90_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 
 /** How many times to retry a failed request before giving up. */
 const MAX_RETRIES = 3;
@@ -32,9 +34,9 @@ interface ImageResponse {
 // ---------------------------------------------------------------------------
 
 /**
- * OpenAI gpt-image-1 image generation provider.
+ * OpenAI image provider, using the model and quality saved in settings.
  *
- * gpt-image-1 supports n=1..10 per request, so all variants are fetched in
+ * The model supports n=1..10 per request, so all variants are fetched in
  * a single API call.
  *
  * API key: read from application preferences only.
@@ -48,14 +50,16 @@ export class OpenAIProvider implements ImageProvider {
       );
     }
 
+    const settings = getImageSettings("openai");
     const images = request.referenceImageB64
       ? await this.editBatch(
           apiKey,
           request.positivePrompt,
           request.referenceImageB64,
-          request.count
+          request.count,
+          settings
         )
-      : await this.generateBatch(apiKey, request.positivePrompt, request.count);
+      : await this.generateBatch(apiKey, request.positivePrompt, request.count, settings);
     return { images };
   }
 
@@ -63,7 +67,8 @@ export class OpenAIProvider implements ImageProvider {
   private generateBatch(
     apiKey: string,
     prompt: string,
-    n: number
+    n: number,
+    settings: ImageSettings
   ): Promise<string[]> {
     return withRetry(async () => {
       const controller = new AbortController();
@@ -81,11 +86,13 @@ export class OpenAIProvider implements ImageProvider {
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: "gpt-image-1",
+            model: settings.model,
             prompt,
             n,
             size: "1024x1024",
-            quality: "high",
+            quality: settings.quality,
+            output_format: "png",
+            background: "opaque",
           }),
         });
 
@@ -110,7 +117,8 @@ export class OpenAIProvider implements ImageProvider {
     apiKey: string,
     prompt: string,
     referenceB64: string,
-    n: number
+    n: number,
+    settings: ImageSettings
   ): Promise<string[]> {
     return withRetry(async () => {
       const controller = new AbortController();
@@ -122,11 +130,13 @@ export class OpenAIProvider implements ImageProvider {
       try {
         const imageBuffer = Buffer.from(referenceB64, "base64");
         const form = new FormData();
-        form.append("model", "gpt-image-1");
+        form.append("model", settings.model);
         form.append("prompt", prompt);
         form.append("n", String(n));
         form.append("size", "1024x1024");
-        form.append("quality", "high");
+        form.append("quality", settings.quality);
+        form.append("output_format", "png");
+        form.append("background", "opaque");
         form.append(
           "image",
           new Blob([imageBuffer], { type: "image/png" }),
