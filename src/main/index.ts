@@ -1,5 +1,5 @@
 import './sentry';
-import { app, BrowserWindow, workspace, ipc, Menu, MenuItem, MenuWithRole, prefs, Theme } from '@mobrowser/api';
+import { app, BrowserWindow, workspace, ipc, Menu, MenuItem, MenuWithRole, Theme } from '@mobrowser/api';
 import { exec } from 'node:child_process';
 import { preserveSmallIconAlpha } from './lib/icns-alpha';
 import * as fs from 'node:fs/promises';
@@ -29,11 +29,11 @@ import { AppServiceDescriptor } from './gen/ipc_service';
 import { buildPrompt } from './lib/prompt-builder';
 import { getProvider, resolveProviderName } from './lib/image-provider';
 import { getImageSettings, saveImageSettings } from './lib/generation-settings';
-import { listImageModels } from './lib/image-models';
+import { listImageModels, ProviderRequestError } from './lib/image-models';
+import { saveValidatedApiKey } from './lib/api-key-settings';
 import {
   getResolvedApiKey,
   hasApiKeyInPrefs,
-  API_KEY_PREFS_KEY,
 } from './lib/openai-api-key';
 
 // ---------------------------------------------------------------------------
@@ -443,11 +443,16 @@ ipc.registerService(AppServiceDescriptor, {
   async GetGenerationSettings(request: GetGenerationSettingsRequest) {
     const provider = resolveProviderName();
     const settings = getImageSettings(provider);
+    const base = { provider, ...settings, hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: provider !== 'mock' };
+    if (base.apiKeyRequired && !base.hasApiKey) {
+      return { ...base, models: [], error: '', errorCode: '' };
+    }
     try {
       const models = await listImageModels(provider, getResolvedApiKey(), request.refresh);
-      return { provider, ...settings, models, error: '' };
+      return { ...base, models, error: '', errorCode: '' };
     } catch (err) {
-      return { provider, ...settings, models: [], error: err instanceof Error ? err.message : String(err) };
+      return { ...base, models: [], error: err instanceof Error ? err.message : String(err),
+        errorCode: err instanceof ProviderRequestError ? err.code : '' };
     }
   },
 
@@ -473,14 +478,11 @@ ipc.registerService(AppServiceDescriptor, {
   async SetOpenAIApiKey(
     request: SetOpenAIApiKeyRequest
   ): Promise<SetOpenAIApiKeyResponse> {
-    const key = request.apiKey.trim();
-    if (!key) {
-      return { error: 'API key cannot be empty.' };
+    try {
+      const settings = await saveValidatedApiKey(request.apiKey);
+      return { error: '', settings };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Could not check the API key. Try again.', settings: undefined };
     }
-    prefs.setString(API_KEY_PREFS_KEY, key);
-    if (!prefs.persist()) {
-      return { error: 'Could not save preferences to disk.' };
-    }
-    return { error: '' };
   },
 });

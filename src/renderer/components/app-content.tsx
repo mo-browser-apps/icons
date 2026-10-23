@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Download } from "lucide-react"
 import { MacOSIcon } from "@/components/macos-icon"
-import {
-  OpenAIApiKeyManageModal,
-  OpenAIApiKeyStartupModal,
-  type OpenAIApiKeyManageReason,
-} from "@/components/openai-api-key-modals"
 import { PromptInput, type PrimaryAction } from "@/components/prompt-input"
 import { GenerationSettings } from "@/components/generation-settings"
 import { ErrorModal, generationErrorSuggestsApiKeyIssue } from "@/components/error-modal"
@@ -32,33 +27,12 @@ export function AppContent() {
     null
   )
   const [iconDirty, setIconDirty] = useState(false)
-  const [openAIApiKeyStartupOpen, setOpenAIApiKeyStartupOpen] = useState(false)
-  const [settingsRevision, setSettingsRevision] = useState(0)
-  const [openAIApiKeyManageReason, setOpenAIApiKeyManageReason] =
-    useState<OpenAIApiKeyManageReason | null>(null)
+  const [keyReady, setKeyReady] = useState<boolean | null>(null)
+  const [keyRequest, setKeyRequest] = useState(0)
   const resumeAfterCancelRef = useRef<ResumeAfterCancel>("idle")
 
   const pipeline = useIconPipeline()
   const prevPipelineStatusRef = useRef(pipeline.status)
-
-  useEffect(() => {
-    ipc.app
-      .GetOpenAIApiKeyStatus({})
-      .then((s) => {
-        const resp = s as unknown as {
-          openaiKeyRequired?: boolean
-          openai_key_required?: boolean
-          hasOpenaiKey?: boolean
-          has_openai_key?: boolean
-        }
-        const required = resp.openaiKeyRequired ?? resp.openai_key_required
-        const hasKey = resp.hasOpenaiKey ?? resp.has_openai_key
-        if (required === true && hasKey !== true) {
-          setOpenAIApiKeyStartupOpen(true)
-        }
-      })
-      .catch(() => {})
-  }, [])
 
   const clearAttachments = useCallback(() => {
     setAttachments((prev) => {
@@ -97,6 +71,10 @@ export function AppContent() {
 
   const startGeneration = () => {
     if (!prompt.trim() || iconState === "generating") return
+    if (!keyReady) {
+      setKeyRequest((request) => request + 1)
+      return
+    }
     resumeAfterCancelRef.current =
       iconState === "refine" ? "refine" : iconState === "generated" ? "generated" : "idle"
     setSelectedVariant(null)
@@ -169,7 +147,7 @@ export function AppContent() {
       : primaryAction === "select"
         ? selectedVariant !== null
         : primaryAction === "refresh" || primaryAction === "submit"
-          ? prompt.trim().length > 0
+          ? keyReady !== null && prompt.trim().length > 0
           : false
 
   const onPrimary = () => {
@@ -201,7 +179,7 @@ export function AppContent() {
             generationErrorSuggestsApiKeyIssue(errorMessage)
               ? () => {
                   setErrorMessage(null)
-                  setOpenAIApiKeyManageReason("authError")
+                  setKeyRequest((request) => request + 1)
                 }
               : undefined
           }
@@ -213,26 +191,6 @@ export function AppContent() {
           folderPath={saveSuccess.folderPath}
           icnsPath={saveSuccess.icnsPath}
           onClose={() => setSaveSuccess(null)}
-        />
-      )}
-
-      {openAIApiKeyStartupOpen && (
-        <OpenAIApiKeyStartupModal onSaved={() => {
-          setOpenAIApiKeyStartupOpen(false)
-          setSettingsRevision((revision) => revision + 1)
-        }} />
-      )}
-      {openAIApiKeyManageReason !== null && (
-        <OpenAIApiKeyManageModal
-          key={openAIApiKeyManageReason}
-          reason={openAIApiKeyManageReason}
-          onClose={(saved) => {
-            setOpenAIApiKeyManageReason(null)
-            if (saved) {
-              setOpenAIApiKeyStartupOpen(false)
-              setSettingsRevision((revision) => revision + 1)
-            }
-          }}
         />
       )}
 
@@ -291,9 +249,9 @@ export function AppContent() {
           attachments={attachments}
           onAttachmentsChange={setAttachments}
           settingsControl={<GenerationSettings
-            key={settingsRevision}
             disabled={iconState === "generating"}
-            onManageKey={() => setOpenAIApiKeyManageReason("settings")}
+            keyRequest={keyRequest}
+            onKeyReadyChange={setKeyReady}
           />}
         />
       </div>

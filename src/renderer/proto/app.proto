@@ -68,6 +68,7 @@ message SetOpenAIApiKeyRequest {
 message SetOpenAIApiKeyResponse {
   // Empty on success; otherwise a short error message for the user.
   string error = 1;
+  GetGenerationSettingsResponse settings = 2;
 }
 
 message GetStoredOpenAIApiKeyRequest {}
@@ -98,6 +99,9 @@ message GetGenerationSettingsResponse {
   string quality = 3;
   repeated ImageModelOption models = 4;
   string error = 5;
+  bool has_api_key = 6;
+  bool api_key_required = 7;
+  string error_code = 8;
 }
 
 message SetGenerationSettingsRequest {

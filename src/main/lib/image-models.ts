@@ -79,16 +79,36 @@ export function validateSettings(settings: ImageSettings, model: ImageModel): vo
   }
 }
 
+export class ProviderRequestError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 async function getJSON<T>(url: string, apiKey?: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    signal: AbortSignal.timeout(15_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new ProviderRequestError("Could not connect to the provider. Check your connection and try again.", "connection");
+  }
   if (!response.ok) {
     // Do not forward provider response bodies that might include credentials.
-    throw new Error(`Could not load models (${response.status}). Check your API key and try again.`);
+    if (response.status === 401) throw new ProviderRequestError("The provider rejected this API key (401). Check the key and try again.", "invalid_key");
+    if (response.status === 403) throw new ProviderRequestError("This key does not have permission to access the provider. Check its permissions and account access.", "permissions");
+    if (response.status === 429) throw new ProviderRequestError("The provider is limiting requests. Wait a moment and try again.", "rate_limit");
+    throw new ProviderRequestError(`The provider could not complete the request (${response.status}). Try again later.`, "service");
   }
-  return response.json() as Promise<T>;
+  try {
+    return await response.json() as T;
+  } catch {
+    throw new ProviderRequestError("The provider returned an unexpected response. Try again later.", "service");
+  }
 }
 
 let cached: { provider: ImageService; key: string; expires: number; models: ImageModel[] } | undefined;
@@ -104,6 +124,11 @@ export async function listImageModels(provider: ImageService, apiKey: string, re
     const response = await getJSON<{ data: Array<{ id: string }> }>("https://api.openai.com/v1/models", apiKey);
     models = response.data.map(({ id }) => openAIModel(id)).filter((model): model is ImageModel => !!model);
   } else {
+    // The model catalog is public, so it cannot establish that a key is valid.
+    const key = await getJSON<{ data: { is_management_key?: boolean } }>("https://openrouter.ai/api/v1/key", apiKey);
+    if (!key.data || key.data.is_management_key) {
+      throw new ProviderRequestError("Use an OpenRouter inference API key with permission to generate images.", "permissions");
+    }
     const response = await getJSON<{ data: RouterModel[] }>("https://openrouter.ai/api/v1/images/models");
     models = response.data.map(routerModel).filter((model): model is ImageModel => !!model);
   }

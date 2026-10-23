@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import vm from "node:vm";
-import ts from "typescript";
+import { mainLoader } from "./helpers/load-main.mjs";
 
-const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL("../", import.meta.url));
 const fixtures = JSON.parse(readFileSync(new URL("./fixtures/generated-images.json", import.meta.url), "utf8"));
 
@@ -15,7 +12,6 @@ const fixtures = JSON.parse(readFileSync(new URL("./fixtures/generated-images.js
 // Preferences and HTTP are isolated; no keys or paid generation are used.
 function providerWith(response) {
   let calls = 0;
-  const cache = new Map();
   const prefs = {
     getString: () => "test-key",
     getObject: () => ({ model: "example/image", quality: "" }),
@@ -32,23 +28,7 @@ function providerWith(response) {
     assert.equal(options.method, "POST");
     return response(++calls, JSON.parse(options.body));
   };
-  function load(file) {
-    if (cache.has(file)) return cache.get(file).exports;
-    const module = { exports: {} };
-    cache.set(file, module);
-    const source = ts.transpileModule(readFileSync(file, "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    }).outputText;
-    const localRequire = (id) => id === "@mobrowser/api" ? { prefs }
-      : id.startsWith(".") ? load(path.resolve(path.dirname(file), id + ".ts")) : require(id);
-    vm.runInNewContext(`(function(require, module, exports) {${source}\n})`, {
-      Buffer, process: { env: {} }, console, fetch, AbortSignal, AbortController,
-      // Skip backoff delays while retaining request timeout behavior.
-      setTimeout: (callback, delay) => setTimeout(callback, delay <= 2000 ? 0 : delay),
-      clearTimeout,
-    })(localRequire, module, module.exports);
-    return module.exports;
-  }
+  const load = mainLoader({ prefs, fetch });
   const { OpenRouterProvider } = load(path.join(root, "src/main/lib/providers/openrouter.ts"));
   const provider = new OpenRouterProvider();
   return {
