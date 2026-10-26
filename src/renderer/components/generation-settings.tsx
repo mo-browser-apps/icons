@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ChevronDown, Eye, EyeOff, RefreshCw, Settings2, X } from "lucide-react"
+import { ChevronDown, ExternalLink, Eye, EyeOff, RefreshCw, Settings2, X } from "lucide-react"
 import { ipc } from "@/gen/ipc"
 import type { GetGenerationSettingsResponse, ImageModelOption } from "@/gen/app"
 
@@ -186,7 +186,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
       type="button"
       onClick={show}
       disabled={disabled || (loading && !settings)}
-      title="Model and quality"
+      title="Model and effort"
       aria-label="Generation settings"
       className="flex items-center gap-1.5 h-8 max-w-56 px-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors disabled:opacity-50"
     >
@@ -197,7 +197,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
       <dialog
         ref={dialog}
         aria-labelledby="generation-settings-title"
-        aria-describedby="generation-settings-description"
+        aria-describedby={step === "models" ? undefined : "generation-settings-description"}
         style={{ colorScheme: "dark", scrollbarWidth: "thin", scrollbarColor: "#444 transparent" }}
         onCancel={(event) => { event.preventDefault(); close() }}
         onKeyDown={(event) => {
@@ -216,9 +216,9 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
               <X className="w-4 h-4" />
             </button>
           </div>
-          <p id="generation-settings-description" className="text-xs text-muted-foreground mt-1">{step === "remove" ? "Disconnect image generation from this app." : step === "key"
-            ? "Connect OpenAI or OpenRouter to generate icons."
-            : settings?.provider === "openrouter" ? "OpenRouter" : settings?.provider === "mock" ? "Local preview" : settings ? "OpenAI" : "Choose your model and quality."}</p>
+          {step !== "models" && <p id="generation-settings-description" className="text-xs text-muted-foreground mt-1">{step === "remove"
+            ? "Disconnect image generation from this app."
+            : "Connect OpenAI or OpenRouter to generate icons."}</p>}
         </div>
         <form onSubmit={(event) => {
           event.preventDefault()
@@ -227,35 +227,28 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
           else void save()
         }} aria-busy={saving || loading}>
           <div className="px-5 py-5 space-y-4">
-            {step === "remove" ? <p className="text-sm text-muted-foreground">You’ll need to add an API key to generate icons again. Your model and quality choices will be kept.</p> : step === "key" ? <div>
-              <label htmlFor="generation-api-key" className="block text-sm font-medium mb-2">{settings?.hasApiKey ? "New API key" : "API key"}</label>
+            {step === "remove" ? <p className="text-sm text-muted-foreground">You’ll need to add an API key to generate icons again. Your model and effort choices will be kept.</p> : step === "key" ? <div>
+              <label htmlFor="generation-api-key" className="sr-only">{settings?.hasApiKey ? "New API key" : "API key"}</label>
               <div className="relative">
                 <input
                   ref={keyInput} id="generation-api-key" type={showKey ? "text" : "password"}
                   value={apiKey} onChange={(event) => { setApiKey(event.target.value); setError("") }}
-                  placeholder="Paste your API key" disabled={saving}
+                  placeholder="Your API key" disabled={saving}
                   autoComplete="off" autoCapitalize="none" spellCheck={false}
-                  aria-describedby={error ? "generation-settings-error" : "generation-key-help"} aria-invalid={!!error}
+                  aria-describedby={error ? "generation-settings-error" : undefined} aria-invalid={!!error}
                   className="w-full h-10 rounded-lg border border-border bg-secondary pl-3 pr-11 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
                 />
                 <button type="button" onClick={() => setShowKey(!showKey)} disabled={saving} aria-label={showKey ? "Hide API key" : "Show API key"} className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground">
                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              <p id="generation-key-help" className="text-xs text-muted-foreground mt-2">{settings?.hasApiKey ? "Your current key stays active until the new one is checked." : "We’ll check your key before showing available models."}</p>
-              <div className="flex items-center gap-3 mt-3 text-xs text-muted-foreground">
-                <span>Get a key:</span>
-                <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="underline underline-offset-4 hover:text-foreground">OpenAI</button>
-                <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://openrouter.ai/keys" }).catch(() => {})} className="underline underline-offset-4 hover:text-foreground">OpenRouter</button>
-              </div>
               {canRemoveKey && <button type="button" disabled={saving} onClick={() => { setError(""); setStep("remove") }} className="mt-4 text-xs text-red-400 hover:text-red-300 disabled:opacity-50">Remove API key</button>}
             </div> : <>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label htmlFor="generation-model" className="text-sm font-medium">Model</label>
-                  <button type="button" onClick={refresh} disabled={loading || saving} aria-label="Refresh models" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50">
-                    <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
-                    {loading ? "Loading…" : "Refresh"}
+                  <label htmlFor="generation-model" className="text-sm font-medium">{settings?.provider === "openrouter" ? "OpenRouter model" : settings?.provider === "openai" ? "OpenAI model" : "Model"}</label>
+                  <button type="button" onClick={refresh} disabled={loading || saving} aria-label="Refresh models" title={loading ? "Loading models…" : "Refresh models"} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50">
+                    <RefreshCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
                   </button>
                 </div>
                 <div className="relative">
@@ -275,7 +268,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
                 </div>
               </div>
               {!!selected?.qualities.length && <fieldset disabled={loading || saving}>
-                <legend className="text-sm font-medium mb-2">Quality</legend>
+                <legend className="text-sm font-medium mb-2">Effort</legend>
                 <div className="flex flex-wrap gap-1 rounded-lg bg-secondary/60 p-1">
                   {selected.qualities.map((quality) => <button
                     key={quality} type="button" aria-pressed={draft.quality === quality}
@@ -283,18 +276,24 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
                     className={`flex-1 py-1.5 px-2 rounded-md text-xs transition-colors ${draft.quality === quality ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                   >{label(quality)}</button>)}
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">{draft.quality === "auto" ? "The model chooses the quality automatically." : "Higher quality can take longer and cost more."}</p>
+                <p className="text-xs text-muted-foreground mt-2">{draft.quality === "auto" ? "The model chooses the effort automatically." : "Higher effort can take longer and cost more."}</p>
               </fieldset>}
             </>}
             {error && <p id="generation-settings-error" role="alert" className="text-xs text-red-400">{error}</p>}
           </div>
-          <div className="flex items-center justify-between gap-3 px-5 pb-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-5">
             {step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
-              : step === "key" ? settings?.hasApiKey ? <button type="button" disabled={saving} onClick={() => { setApiKey(""); setShowKey(false); setError(settings.error); setStep("models") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button> : <span />
-              : settings?.apiKeyRequired ? <button type="button" disabled={saving} onClick={editKey} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">API key</button> : <span />}
-            <button type="submit" disabled={saving || (step === "remove" ? !canRemoveKey : step === "key" ? !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
-              {step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
-            </button>
+              : step === "key" ? <div className="flex items-center gap-1">
+                <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenAI <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://openrouter.ai/keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenRouter <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
+              </div>
+              : settings?.apiKeyRequired ? <button type="button" disabled={saving} onClick={editKey} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button> : <span />}
+            <div className="ml-auto flex items-center gap-2">
+              {step === "key" && settings?.hasApiKey && <button type="button" disabled={saving} onClick={() => { setApiKey(""); setShowKey(false); setError(settings.error); setStep("models") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button>}
+              <button type="submit" disabled={saving || (step === "remove" ? !canRemoveKey : step === "key" ? !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
+                {step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
+              </button>
+            </div>
           </div>
         </form>
       </dialog>, document.body
