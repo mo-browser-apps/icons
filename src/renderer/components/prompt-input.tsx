@@ -4,13 +4,13 @@ import {
   type Dispatch,
   type KeyboardEvent,
   type SetStateAction,
+  type ReactNode,
 } from "react"
 import {
   ArrowUp,
   ChevronRight,
   ImagePlus,
   RefreshCw,
-  Settings2,
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -40,7 +40,7 @@ export function PromptInput({
   placeholder,
   attachments,
   onAttachmentsChange,
-  onOpenApiKeySettings,
+  settingsControl,
 }: {
   value: string
   onChange: (v: string) => void
@@ -53,7 +53,7 @@ export function PromptInput({
   placeholder: string
   attachments: string[]
   onAttachmentsChange: Dispatch<SetStateAction<string[]>>
-  onOpenApiKeySettings: () => void
+  settingsControl: ReactNode
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -157,19 +157,7 @@ export function PromptInput({
             <ImagePlus className="w-4 h-4" />
           </button>
 
-          <button
-            type="button"
-            onClick={onOpenApiKeySettings}
-            className={cn(
-              "flex items-center justify-center w-8 h-8 rounded-full",
-              "text-muted-foreground hover:text-foreground hover:bg-white/10",
-              "transition-colors shrink-0"
-            )}
-            title="OpenAI API key"
-            aria-label="OpenAI API key settings"
-          >
-            <Settings2 className="w-4 h-4" />
-          </button>
+          {settingsControl}
 
           {/* Inline attachment thumbnails — same row, no height change. */}
           {attachments.map((src, i) => (
