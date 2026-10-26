@@ -30,6 +30,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
   const [draft, setDraft] = useState({ model: "", quality: "" })
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<"key" | "models" | "remove">("models")
+  const [isSetupFlow, setIsSetupFlow] = useState(false)
   const [apiKey, setApiKey] = useState("")
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -50,7 +51,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
       setDraft(savedDraft(response))
       setError(response.error)
       onKeyReadyChange(!needsKey(response))
-      if (needsKey(response)) { setStep("key"); setOpen(true) }
+      if (needsKey(response)) { setIsSetupFlow(true); setStep("key"); setOpen(true) }
     }).catch(() => {
       if (version === requestVersion.current) {
         setError("Could not load generation settings. Try again.")
@@ -71,7 +72,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
   }
 
   useEffect(() => {
-    if (keyRequest) editKey()
+    if (keyRequest) { setIsSetupFlow(true); editKey() }
   }, [keyRequest])
 
   useEffect(() => {
@@ -101,6 +102,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
     if (settings) {
       setDraft(savedDraft(settings))
       setError(settings.error)
+      setIsSetupFlow(needsKey(settings))
       setStep(needsKey(settings) ? "key" : "models")
     }
     setOpen(true)
@@ -119,7 +121,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
       })
       setError(response.error)
       onKeyReadyChange(!needsKey(response))
-      if (needsKey(response)) setStep("key")
+      if (needsKey(response)) { setIsSetupFlow(true); setStep("key") }
     } catch {
       if (version === requestVersion.current) setError("Could not refresh models. Try again.")
     } finally { if (version === requestVersion.current) setLoading(false) }
@@ -174,6 +176,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
       setApiKey("")
       setShowKey(false)
       onKeyReadyChange(false)
+      setIsSetupFlow(true)
       setStep("key")
     } catch {
       if (version === requestVersion.current) setError("Could not remove the API key. Try again.")
@@ -287,7 +290,7 @@ export function GenerationSettings({ disabled, keyRequest, onKeyReadyChange }: {
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenAI <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://openrouter.ai/keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenRouter <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
               </div>
-              : settings?.apiKeyRequired ? <button type="button" disabled={saving} onClick={editKey} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button> : <span />}
+              : settings?.apiKeyRequired ? <button type="button" disabled={saving} onClick={editKey} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">{isSetupFlow ? "Back" : "Change API key"}</button> : <span />}
             <div className="ml-auto flex items-center gap-2">
               {step === "key" && settings?.hasApiKey && <button type="button" disabled={saving} onClick={() => { setApiKey(""); setShowKey(false); setError(settings.error); setStep("models") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button>}
               <button type="submit" disabled={saving || (step === "remove" ? !canRemoveKey : step === "key" ? !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
