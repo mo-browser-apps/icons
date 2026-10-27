@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Download } from "lucide-react"
 import { MacOSIcon } from "@/components/macos-icon"
 import { PromptInput, type PrimaryAction } from "@/components/prompt-input"
@@ -17,7 +17,8 @@ type ResumeAfterCancel = "idle" | "generated" | "refine"
 export function AppContent() {
   const [iconState, setIconState] = useState<IconState>("idle")
   const [prompt, setPrompt] = useState("")
-  const [attachments, setAttachments] = useState<string[]>([])
+  const [attachment, setAttachment] = useState<string | null>(null)
+  const [attachmentLoading, setAttachmentLoading] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState<number | null>(null)
   const [baseIconSrc, setBaseIconSrc] = useState<string | null>(null)
   // Original artwork for model edits; baseIconSrc is the finished export PNG.
@@ -34,16 +35,10 @@ export function AppContent() {
   const pipeline = useIconPipeline()
   const prevPipelineStatusRef = useRef(pipeline.status)
 
-  const clearAttachments = useCallback(() => {
-    setAttachments((prev) => {
-      for (const url of prev) URL.revokeObjectURL(url)
-      return []
-    })
-  }, [])
-
   // Sync iconState with pipeline status changes.
   useEffect(() => {
     if (pipeline.status === "done") {
+      setSelectedVariant(null)
       const hasAny = pipeline.variants.some((v) => v !== null)
       setIconState(hasAny ? "generated" : "idle")
     } else if (pipeline.status === "error") {
@@ -70,19 +65,18 @@ export function AppContent() {
   }, [iconDirty])
 
   const startGeneration = () => {
-    if (!prompt.trim() || iconState === "generating") return
+    if (!prompt.trim() || iconState === "generating" || attachmentLoading) return
     if (!connectionReady) {
       setConnectionRequest((request) => request + 1)
       return
     }
     resumeAfterCancelRef.current =
       iconState === "refine" ? "refine" : iconState === "generated" ? "generated" : "idle"
-    setSelectedVariant(null)
     setIconState("generating")
     // In refine mode the confirmed variant is the reference; otherwise use the
     // user-attached image (if any).
-    const referenceImage = iconState === "refine" ? (rawBaseIconSrc ?? attachments[0]) : attachments[0]
-    pipeline.generate(prompt, referenceImage)
+    const referenceImage = iconState === "refine" ? rawBaseIconSrc : attachment
+    pipeline.generate(prompt, referenceImage ?? undefined)
   }
 
   const stopGeneration = () => {
@@ -98,7 +92,7 @@ export function AppContent() {
     setIconState("refine")
     setSelectedVariant(null)
     setPrompt("")
-    clearAttachments()
+    setAttachment(null)
   }
 
   const handleSave = async () => {
@@ -241,13 +235,15 @@ export function AppContent() {
           onChange={setPrompt}
           primaryAction={primaryAction}
           onPrimary={onPrimary}
-          primaryEnabled={primaryEnabled}
+          primaryEnabled={primaryEnabled && !attachmentLoading}
           onRegenerate={primaryAction === "select" ? startGeneration : undefined}
-          regenerateEnabled={prompt.trim().length > 0}
+          regenerateEnabled={prompt.trim().length > 0 && !attachmentLoading}
           inputDisabled={iconState === "generating"}
+          referenceLocked={iconState === "refine"}
           placeholder={inputPlaceholder}
-          attachments={attachments}
-          onAttachmentsChange={setAttachments}
+          attachment={attachment}
+          onAttachmentChange={setAttachment}
+          onAttachmentLoadingChange={setAttachmentLoading}
           settingsControl={<GenerationSettings
             disabled={iconState === "generating"}
             connectionRequest={connectionRequest}

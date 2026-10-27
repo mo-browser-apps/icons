@@ -54,8 +54,8 @@ export function useIconPipeline(): IconPipeline {
   const generate = useCallback(async (prompt: string, referenceDataUrl?: string) => {
     const generation = ++generationRef.current
     const isCurrent = () => generation === generationRef.current
-    setVariants([null, null, null])
-    setRawVariants([null, null, null])
+    // Keep the last completed set until its replacement is ready. Stop, provider
+    // errors and image decoding failures must not destroy the user's work.
     setStatus("generating")
     setProgress({ fraction: 0, label: "" })
 
@@ -87,12 +87,21 @@ export function useIconPipeline(): IconPipeline {
       // artwork, so margins, masks and shadows never accumulate across edits.
       const newVariants: (string | null)[] = [null, null, null]
       const newRawVariants: (string | null)[] = [null, null, null]
+      let preparationError: unknown
       for (let i = 0; i < Math.min(response.images.length, 3); i++) {
-        const raw = await generatedImageToPngDataURL(response.images[i])
+        try {
+          const raw = await generatedImageToPngDataURL(response.images[i])
+          if (!isCurrent()) return
+          const prepared = await prepareIcon(raw)
+          newRawVariants[i] = raw
+          newVariants[i] = prepared
+        } catch (error) {
+          preparationError = error
+        }
         if (!isCurrent()) return
-        newRawVariants[i] = raw
-        newVariants[i] = await prepareIcon(raw)
-        if (!isCurrent()) return
+      }
+      if (!newVariants.some(Boolean)) {
+        throw preparationError ?? new Error("No usable images were returned. Please try again.")
       }
       setRawVariants(newRawVariants)
       setVariants(newVariants)

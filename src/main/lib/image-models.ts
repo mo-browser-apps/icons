@@ -87,14 +87,15 @@ export class ProviderRequestError extends Error {
   }
 }
 
-async function getJSON<T>(url: string, apiKey?: string): Promise<T> {
+async function getJSON<T>(url: string, apiKey?: string, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-      signal: AbortSignal.timeout(15_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
   } catch {
+    signal?.throwIfAborted();
     throw new ProviderRequestError("Could not connect to the provider. Check your connection and try again.", "connection");
   }
   if (!response.ok) {
@@ -140,10 +141,10 @@ export async function listImageModels(provider: ImageService, apiKey: string, re
 }
 
 /** Confirm quality and reference support on the same endpoint. */
-export async function compatibleRouterProviders(settings: ImageSettings): Promise<string[]> {
+export async function compatibleRouterProviders(settings: ImageSettings, signal?: AbortSignal): Promise<string[]> {
   const id = settings.model.split("/").map(encodeURIComponent).join("/");
   const response = await getJSON<{ endpoints: Array<{ provider_tag?: string | null; supported_parameters: Parameters }> }>(
-    `https://openrouter.ai/api/v1/images/models/${id}/endpoints`
+    `https://openrouter.ai/api/v1/images/models/${id}/endpoints`, undefined, signal
   );
   const compatible = response.endpoints.filter(({ supported_parameters: parameters }) =>
     supportsIconWorkflow(parameters) &&
