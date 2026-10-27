@@ -410,7 +410,6 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 {codexSelected && <p id="codex-disconnect-description" className="mt-3 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>}
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">Generation uses your plan’s allowance and available credits. Usage starts when you press Generate.</p>
-              {codexConnected && <p className="text-xs leading-relaxed text-muted-foreground">ChatGPT chooses the image model and quality. Each generation creates up to three variants.</p>}
               {!codexConnected && <div className="flex items-center gap-4 text-xs">
                 <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
