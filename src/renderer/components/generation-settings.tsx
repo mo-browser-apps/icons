@@ -395,23 +395,25 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
               </button>
               <p className="pt-1 text-center text-xs text-muted-foreground">You can change this in generation settings anytime.</p>
             </div> : step === "codex" ? <div className="space-y-4">
-              <div role="status" aria-live="polite" className="flex items-start gap-3 rounded-xl border border-border bg-secondary/40 p-4">
-                <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${codexConnected ? "bg-emerald-500/10 text-emerald-400" : "bg-secondary text-muted-foreground"}`}>
-                  {checkingCodex || codex?.state === "waiting" ? <RefreshCw className="h-4 w-4 animate-spin" /> : codexConnected ? <Check className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                </span>
-                <div className="min-w-0"><p className="text-sm font-medium">{codexTitle}</p>
-                  <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{codexDescription}</p>
+              <div className="rounded-xl border border-border bg-secondary/40 p-4">
+                <div className="flex items-center gap-3">
+                  <div role="status" aria-live="polite" className="flex min-w-0 flex-1 items-start gap-3">
+                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${codexConnected ? "bg-emerald-500/10 text-emerald-400" : "bg-secondary text-muted-foreground"}`}>
+                      {checkingCodex || codex?.state === "waiting" ? <RefreshCw className="h-4 w-4 animate-spin" /> : codexConnected ? <Check className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                    </span>
+                    <div className="min-w-0 flex-1"><p className="text-sm font-medium">{codexTitle}</p>
+                      <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{codexDescription}</p>
+                    </div>
+                  </div>
+                  {codexSelected && <button type="button" disabled={saving || checkingCodex} onClick={() => void disconnectCodex()} aria-label="Disconnect from MōIcons" aria-describedby="codex-disconnect-description" className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Disconnect</button>}
                 </div>
+                {codexSelected && <p id="codex-disconnect-description" className="mt-3 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>}
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">Generation uses your plan’s allowance and available credits. Usage starts when you press Generate.</p>
               {codexConnected && <p className="text-xs leading-relaxed text-muted-foreground">ChatGPT chooses the image model and quality. Each generation creates up to three variants.</p>}
               {!codexConnected && <div className="flex items-center gap-4 text-xs">
                 <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
-              </div>}
-              {codexSelected && <div className="border-t border-border pt-3">
-                <button type="button" disabled={saving || checkingCodex} onClick={() => void disconnectCodex()} className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Disconnect from MōIcons</button>
-                <p className="mt-1 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>
               </div>}
             </div> : step === "remove" ? <p className="text-sm text-muted-foreground">You’ll need to add an API key to generate icons again. Your model and effort choices will be kept.</p> : step === "key" ? <div>
               <label htmlFor="generation-api-key" className="sr-only">{settings?.hasApiKey ? "New API key" : "API key"}</label>
