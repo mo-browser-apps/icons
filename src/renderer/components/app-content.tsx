@@ -3,7 +3,7 @@ import { Download } from "lucide-react"
 import { MacOSIcon } from "@/components/macos-icon"
 import { PromptInput, type PrimaryAction } from "@/components/prompt-input"
 import { GenerationSettings } from "@/components/generation-settings"
-import { ErrorModal, generationErrorSuggestsApiKeyIssue } from "@/components/error-modal"
+import { ErrorModal, generationErrorSuggestsConnectionIssue } from "@/components/error-modal"
 import { SaveSuccessModal } from "@/components/save-success-modal"
 import { SquircleClipDefs } from "@/components/squircle-clip-defs"
 import { TitleBarStatus } from "@/components/title-bar-status"
@@ -27,8 +27,8 @@ export function AppContent() {
     null
   )
   const [iconDirty, setIconDirty] = useState(false)
-  const [keyReady, setKeyReady] = useState<boolean | null>(null)
-  const [keyRequest, setKeyRequest] = useState(0)
+  const [connectionReady, setConnectionReady] = useState<boolean | null>(null)
+  const [connectionRequest, setConnectionRequest] = useState(0)
   const resumeAfterCancelRef = useRef<ResumeAfterCancel>("idle")
 
   const pipeline = useIconPipeline()
@@ -71,8 +71,8 @@ export function AppContent() {
 
   const startGeneration = () => {
     if (!prompt.trim() || iconState === "generating") return
-    if (!keyReady) {
-      setKeyRequest((request) => request + 1)
+    if (!connectionReady) {
+      setConnectionRequest((request) => request + 1)
       return
     }
     resumeAfterCancelRef.current =
@@ -147,7 +147,7 @@ export function AppContent() {
       : primaryAction === "select"
         ? selectedVariant !== null
         : primaryAction === "refresh" || primaryAction === "submit"
-          ? keyReady !== null && prompt.trim().length > 0
+          ? connectionReady !== null && prompt.trim().length > 0
           : false
 
   const onPrimary = () => {
@@ -175,11 +175,11 @@ export function AppContent() {
         <ErrorModal
           message={errorMessage}
           onClose={() => setErrorMessage(null)}
-          onUpdateApiKey={
-            generationErrorSuggestsApiKeyIssue(errorMessage)
+          onOpenSettings={
+            generationErrorSuggestsConnectionIssue(errorMessage)
               ? () => {
                   setErrorMessage(null)
-                  setKeyRequest((request) => request + 1)
+                  setConnectionRequest((request) => request + 1)
                 }
               : undefined
           }
@@ -250,8 +250,8 @@ export function AppContent() {
           onAttachmentsChange={setAttachments}
           settingsControl={<GenerationSettings
             disabled={iconState === "generating"}
-            keyRequest={keyRequest}
-            onKeyReadyChange={setKeyReady}
+            connectionRequest={connectionRequest}
+            onReadyChange={setConnectionReady}
           />}
         />
       </div>

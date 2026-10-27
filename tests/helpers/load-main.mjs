@@ -14,12 +14,12 @@ export function mainLoader({ prefs, fetch, env = {} }) {
     const module = { exports: {} };
     cache.set(file, module);
     const source = ts.transpileModule(readFileSync(file, "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     }).outputText;
     const localRequire = (id) => id === "@mobrowser/api" ? { prefs }
       : id.startsWith(".") ? load(path.resolve(path.dirname(file), id + ".ts")) : require(id);
     vm.runInNewContext(`(function(require, module, exports) {${source}\n})`, {
-      Buffer, process: { env }, console, fetch, AbortSignal, AbortController,
+      Buffer, URL, Error, process: { env }, console, fetch, AbortSignal, AbortController,
       setTimeout: (callback, delay) => setTimeout(callback, delay <= 2000 ? 0 : delay),
       clearTimeout,
     })(localRequire, module, module.exports);

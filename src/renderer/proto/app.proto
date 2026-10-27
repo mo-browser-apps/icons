@@ -43,6 +43,21 @@ message GenerateIconRequest {
   string reference_image = 3;
   // Seed for reproducibility. 0 = pick automatically.
   int32 seed = 4;
+  string request_id = 5;
+}
+
+message CancelGenerationRequest { string request_id = 1; }
+
+message CodexStatus {
+  // not_installed, update_required, signed_out, waiting, ready, or error.
+  string state = 1;
+  string email = 2;
+  string error = 3;
+}
+
+message SetGenerationConnectionRequest {
+  // codex or api (checked before saving), or none to disconnect only MōIcons.
+  string connection = 1;
 }
 
 message GenerateIconResponse {
@@ -106,6 +121,8 @@ message GetGenerationSettingsResponse {
   bool has_api_key = 6;
   bool api_key_required = 7;
   string error_code = 8;
+  CodexStatus codex = 9;
+  bool ready = 10;
 }
 
 message SetGenerationSettingsRequest {
@@ -138,6 +155,11 @@ service AppService {
   rpc SaveIcon(SaveIconRequest) returns (SaveIconResponse);
   rpc ShowPathInFinder(ShowPathInFinderRequest) returns (google.protobuf.Empty);
   rpc GenerateIcon(GenerateIconRequest) returns (GenerateIconResponse);
+  rpc CancelGeneration(CancelGenerationRequest) returns (google.protobuf.Empty);
+  rpc GetCodexStatus(google.protobuf.Empty) returns (CodexStatus);
+  rpc StartCodexLogin(google.protobuf.Empty) returns (CodexStatus);
+  rpc CancelCodexLogin(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc SetGenerationConnection(SetGenerationConnectionRequest) returns (GetGenerationSettingsResponse);
   rpc GetGenerationSettings(GetGenerationSettingsRequest) returns (GetGenerationSettingsResponse);
   rpc SetGenerationSettings(SetGenerationSettingsRequest) returns (SetGenerationSettingsResponse);
   rpc GetOpenAIApiKeyStatus(GetOpenAIApiKeyStatusRequest) returns (GetOpenAIApiKeyStatusResponse);

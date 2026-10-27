@@ -2,6 +2,8 @@ import { OpenAIProvider } from "./providers/openai";
 import { OpenRouterProvider } from "./providers/openrouter";
 import { MockImageProvider } from "./providers/mock";
 import { getResolvedApiKey, detectProviderFromKey } from "./openai-api-key";
+import { usesCodex, isConnectionDisconnected } from "./generation-connection";
+import { CodexImageProvider } from "./providers/codex";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -14,6 +16,7 @@ export interface GenerationRequest {
   referenceImageB64?: string;
   /** Number of icon variants to generate. */
   count: number;
+  signal?: AbortSignal;
 }
 
 export interface GenerationResult {
@@ -33,7 +36,7 @@ export interface ImageProvider {
 // Supported providers
 // ---------------------------------------------------------------------------
 
-export type ProviderName = "openai" | "openrouter" | "mock";
+export type ProviderName = "openai" | "openrouter" | "mock" | "codex";
 
 // ---------------------------------------------------------------------------
 // Provider resolution — one cached instance per provider name
@@ -46,15 +49,16 @@ const _instances: Partial<Record<ProviderName, ImageProvider>> = {};
  *
  * An explicit `ICON_PROVIDER` environment variable always wins (handy for
  * `mock` during development, or to pin a provider). Otherwise the provider is
- * inferred from the stored API key: an `sk-or-…` key selects OpenRouter, and
- * anything else selects OpenAI. Re-evaluated on every call so swapping the key
- * at runtime takes effect immediately.
+ * resolved from the saved connection choice, falling back to the stored API key
+ * for existing installations. An `sk-or-…` key selects OpenRouter, and anything
+ * else selects OpenAI. Re-evaluated on every call so switching takes effect immediately.
  */
 export function resolveProviderName(): ProviderName {
   const forced = process.env.ICON_PROVIDER?.trim() as ProviderName | undefined;
-  if (forced === "mock" || forced === "openai" || forced === "openrouter") {
+  if (forced === "mock" || forced === "openai" || forced === "openrouter" || forced === "codex") {
     return forced;
   }
+  if (usesCodex()) return "codex";
   return detectProviderFromKey(getResolvedApiKey());
 }
 
@@ -62,17 +66,22 @@ export function resolveProviderName(): ProviderName {
  * Return the active provider, instantiating it on first use per name.
  *
  * Required configuration:
+ *   - codex:     installed Codex with a ChatGPT sign-in
  *   - openai:     `sk-…` key in app preferences
  *   - openrouter: `sk-or-…` key in app preferences (model via OPENROUTER_MODEL)
  *   - mock:       none (placeholder images only, for local testing)
  */
 export function getProvider(): ImageProvider {
+  if (isConnectionDisconnected()) throw new Error("Choose a generation method in settings to continue.");
   const name = resolveProviderName();
   const existing = _instances[name];
   if (existing) return existing;
 
   let created: ImageProvider;
   switch (name) {
+    case "codex":
+      created = new CodexImageProvider();
+      break;
     case "mock":
       created = new MockImageProvider();
       break;
