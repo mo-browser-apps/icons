@@ -22,12 +22,14 @@ export class CodexCompatibilityError extends Error {
   constructor() { super("This ChatGPT connection is not compatible with MōIcons. Update the ChatGPT desktop app, then try again."); }
 }
 
+const fallbackBinPaths = ["/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin")];
+
 export async function findCodex(): Promise<string | undefined> {
   // Finder-launched apps usually have a much smaller PATH than a terminal.
   const candidates = process.env.MOICONS_CODEX_PATH ? [process.env.MOICONS_CODEX_PATH] : [
     ...["/Applications", path.join(homedir(), "Applications")].flatMap((root) =>
       ["ChatGPT.app", "Codex.app"].map((app) => path.join(root, app, "Contents/Resources/codex"))),
-    ...[...(process.env.PATH || "").split(path.delimiter), "/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin")]
+    ...[...(process.env.PATH || "").split(path.delimiter), ...fallbackBinPaths]
       .filter(Boolean).map((dir) => path.join(dir, "codex")),
   ];
   for (const candidate of new Set(candidates)) {
@@ -49,6 +51,9 @@ export class CodexClient {
   private constructor(readonly cwd: string, executable: string) {
     sessions.add(this);
     const env = { ...process.env };
+    // npm CLI launchers use /usr/bin/env node, including when launched from Finder.
+    env.PATH = [...new Set([path.dirname(executable), ...(env.PATH || "").split(path.delimiter),
+      ...fallbackBinPaths].filter(Boolean))].join(path.delimiter);
     delete env.OPENAI_API_KEY;
     delete env.CODEX_API_KEY;
     const overrides = {

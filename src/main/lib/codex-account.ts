@@ -7,7 +7,7 @@ export interface CodexStatus {
 }
 export interface CodexAccount { account: { type: string; email?: string } | null }
 let login: { client: CodexClient; id: string; timer: ReturnType<typeof setTimeout>; unsubscribe: () => void } | undefined;
-let starting = false;
+let starting: { client?: CodexClient } | undefined;
 let loginError = "";
 
 export async function getCodexStatus(): Promise<CodexStatus> {
@@ -26,8 +26,11 @@ export async function getCodexStatus(): Promise<CodexStatus> {
 
 export async function cancelCodexLogin() {
   loginError = "";
+  const pendingStart = starting;
+  starting = undefined;
   const pending = login;
   login = undefined;
+  await pendingStart?.client?.dispose();
   if (!pending) return;
   clearTimeout(pending.timer);
   pending.unsubscribe();
@@ -38,12 +41,22 @@ export async function cancelCodexLogin() {
 
 export async function startCodexLogin(openUrl: (url: string) => void): Promise<CodexStatus> {
   if (starting || login) return { state: "waiting", email: "", error: "" };
-  starting = true;
+  const attempt: { client?: CodexClient } = {};
+  starting = attempt;
   loginError = "";
   let client: CodexClient | undefined;
   try {
     client = await CodexClient.start();
+    attempt.client = client;
+    if (starting !== attempt) {
+      await client.dispose();
+      return { state: "signed_out", email: "", error: "" };
+    }
     const response = await client.request<{ type: string; authUrl: string; loginId: string }>("account/login/start", { type: "chatgpt" });
+    if (starting !== attempt) {
+      await client.dispose();
+      return { state: "signed_out", email: "", error: "" };
+    }
     const url = new URL(response.authUrl);
     if (response.type !== "chatgpt" || url.protocol !== "https:" || !["auth.openai.com", "auth0.openai.com", "auth.chatgpt.com"].includes(url.hostname)) {
       throw new Error("ChatGPT returned an unsupported sign-in link. Update the ChatGPT desktop app and try again.");
@@ -67,8 +80,12 @@ export async function startCodexLogin(openUrl: (url: string) => void): Promise<C
     openUrl(url.href);
     return { state: "waiting", email: "", error: "" };
   } catch (error) {
+    if (starting !== attempt) {
+      await client?.dispose();
+      return { state: "signed_out", email: "", error: "" };
+    }
     if (login?.client === client) await cancelCodexLogin();
     else await client?.dispose();
     return { state: error instanceof CodexCompatibilityError ? "update_required" : "error", email: "", error: error instanceof Error ? error.message : "Could not start sign-in." };
-  } finally { starting = false; }
+  } finally { if (starting === attempt) starting = undefined; }
 }

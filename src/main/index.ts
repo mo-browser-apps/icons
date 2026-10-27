@@ -31,16 +31,14 @@ import { AppServiceDescriptor } from './gen/ipc_service';
 import { buildPrompt } from './lib/prompt-builder';
 import { getProvider, resolveProviderName } from './lib/image-provider';
 import { saveImageSettings } from './lib/generation-settings';
-import { listImageModels } from './lib/image-models';
 import { removeStoredApiKey, saveValidatedApiKey } from './lib/api-key-settings';
 import { readGenerationSettings } from './lib/read-generation-settings';
-import { saveConnection } from './lib/generation-connection';
+import { setGenerationConnection } from './lib/set-generation-connection';
 import { getCodexStatus, startCodexLogin, cancelCodexLogin } from './lib/codex-account';
 import { closeCodexSessions } from './lib/codex-client';
 import {
   getResolvedApiKey,
   hasApiKeyInPrefs,
-  detectProviderFromKey,
 } from './lib/openai-api-key';
 
 // ---------------------------------------------------------------------------
@@ -463,23 +461,8 @@ ipc.registerService(AppServiceDescriptor, {
   async CancelCodexLogin() { await cancelCodexLogin(); return {}; },
 
   async SetGenerationConnection(request: SetGenerationConnectionRequest) {
-    if (process.env.ICON_PROVIDER) throw new Error('The image provider is fixed by the development configuration.');
-    if (request.connection === 'codex') {
-      const status = await getCodexStatus();
-      if (status.state !== 'ready') throw new Error(status.error || 'Connect ChatGPT before continuing.');
-      saveConnection('codex');
-    } else if (request.connection === 'api') {
-      if (!hasApiKeyInPrefs()) throw new Error('Add an API key before continuing.');
-      await listImageModels(detectProviderFromKey(getResolvedApiKey()), getResolvedApiKey(), true);
-      saveConnection('api');
-    } else if (request.connection === 'none') {
-      if ([...generations.values()].some((controller) => !controller.signal.aborted)) {
-        throw new Error('Stop generation before disconnecting.');
-      }
-      saveConnection('none');
-      await cancelCodexLogin();
-    } else throw new Error('Choose ChatGPT or an API key.');
-    return readGenerationSettings();
+    return setGenerationConnection(request.connection,
+      [...generations.values()].some((controller) => !controller.signal.aborted));
   },
 
   async GetOpenAIApiKeyStatus(
