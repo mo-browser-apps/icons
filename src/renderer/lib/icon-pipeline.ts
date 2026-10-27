@@ -41,8 +41,11 @@ export function useIconPipeline(): IconPipeline {
   // Reject stale responses, including when a new generation starts while an
   // earlier request or asynchronous image preparation is still in flight.
   const generationRef = useRef(0)
+  const requestRef = useRef<string | null>(null)
 
   const cancel = useCallback(() => {
+    if (requestRef.current) void ipc.app.CancelGeneration({ requestId: requestRef.current }).catch(() => {})
+    requestRef.current = null
     generationRef.current += 1
     setStatus("idle")
     setProgress({ fraction: 0, label: "" })
@@ -61,7 +64,10 @@ export function useIconPipeline(): IconPipeline {
       const referenceImage = referenceDataUrl ? await imageUrlToPngBase64(referenceDataUrl) : ""
       if (!isCurrent()) return
 
+      const requestId = crypto.randomUUID()
+      requestRef.current = requestId
       const response = await ipc.app.GenerateIcon({
+        requestId,
         prompt,
         negativePrompt: "",
         referenceImage,
@@ -69,6 +75,7 @@ export function useIconPipeline(): IconPipeline {
       })
 
       if (!isCurrent()) return
+      requestRef.current = null
 
       if (response.error) {
         setStatus("error")
@@ -93,6 +100,7 @@ export function useIconPipeline(): IconPipeline {
       setProgress({ fraction: 1, label: "" })
     } catch (err) {
       if (!isCurrent()) return
+      requestRef.current = null
       const msg = err instanceof Error ? err.message : String(err)
       console.error("[icon-pipeline] IPC call failed:", err)
       setStatus("error")

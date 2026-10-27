@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react"
 import { Check, Copy, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-/** True when the message likely indicates a bad or unauthorized OpenAI API key. */
-export function generationErrorSuggestsApiKeyIssue(message: string): boolean {
+/** True when generation settings offer a useful way to recover. */
+export function generationErrorSuggestsConnectionIssue(message: string): boolean {
   const m = message.toLowerCase()
+  if (m.includes("codex") || m.includes("chatgpt")) return true
   if (/\b401\b/.test(m) || /\b403\b/.test(m)) {
     return true
   }
@@ -39,12 +40,11 @@ export function generationErrorSuggestsApiKeyIssue(message: string): boolean {
 export function ErrorModal({
   message,
   onClose,
-  onUpdateApiKey,
+  onOpenSettings,
 }: {
   message: string
   onClose: () => void
-  /** When set, shows a primary action to replace the stored OpenAI key. */
-  onUpdateApiKey?: () => void
+  onOpenSettings?: () => void
 }) {
   const [copied, setCopied] = useState(false)
 
@@ -119,20 +119,20 @@ export function ErrorModal({
             onClick={onClose}
             className={cn(
               "h-8 px-4 rounded-lg text-xs font-medium transition-colors",
-              onUpdateApiKey
+              onOpenSettings
                 ? "bg-secondary/60 text-muted-foreground hover:text-foreground hover:bg-secondary"
                 : "bg-primary text-primary-foreground hover:bg-primary/90",
             )}
           >
             Dismiss
           </button>
-          {onUpdateApiKey && (
+          {onOpenSettings && (
             <button
               type="button"
-              onClick={onUpdateApiKey}
+              onClick={onOpenSettings}
               className="h-8 px-4 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              Update API key
+              Generation settings
             </button>
           )}
         </div>

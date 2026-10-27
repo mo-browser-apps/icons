@@ -8,6 +8,8 @@ import * as os from 'node:os';
 import {
   GenerateIconRequest,
   GenerateIconResponse,
+  CancelGenerationRequest,
+  SetGenerationConnectionRequest,
   GetGenerationSettingsRequest,
   SetGenerationSettingsRequest,
   GetOpenAIApiKeyStatusRequest,
@@ -28,12 +30,17 @@ import {
 import { AppServiceDescriptor } from './gen/ipc_service';
 import { buildPrompt } from './lib/prompt-builder';
 import { getProvider, resolveProviderName } from './lib/image-provider';
-import { getImageSettings, saveImageSettings } from './lib/generation-settings';
-import { listImageModels, ProviderRequestError } from './lib/image-models';
+import { saveImageSettings } from './lib/generation-settings';
+import { listImageModels } from './lib/image-models';
 import { removeStoredApiKey, saveValidatedApiKey } from './lib/api-key-settings';
+import { readGenerationSettings } from './lib/read-generation-settings';
+import { saveConnection } from './lib/generation-connection';
+import { getCodexStatus, startCodexLogin, cancelCodexLogin } from './lib/codex-account';
+import { closeCodexSessions } from './lib/codex-client';
 import {
   getResolvedApiKey,
   hasApiKeyInPrefs,
+  detectProviderFromKey,
 } from './lib/openai-api-key';
 
 // ---------------------------------------------------------------------------
@@ -240,6 +247,13 @@ app.setMenu(appMenu)
 // ---------------------------------------------------------------------------
 
 let hasUnsavedIcon = false;
+const generations = new Map<string, AbortController>();
+
+async function closeGenerationSessions() {
+  for (const controller of generations.values()) controller.abort();
+  await cancelCodexLogin();
+  await closeCodexSessions();
+}
 
 // Create the main app window.
 const win = new BrowserWindow({
@@ -259,6 +273,7 @@ win.show();
 
 win.handle('close', async () => {
   if (!hasUnsavedIcon) {
+    await closeGenerationSessions();
     return 'close';
   }
   const result = await app.showMessageDialog({
@@ -273,6 +288,7 @@ win.handle('close', async () => {
     ],
   });
   if (result.button.type === 'primary') {
+    await closeGenerationSessions();
     return 'close';
   }
   return 'cancel';
@@ -414,6 +430,11 @@ ipc.registerService(AppServiceDescriptor, {
   },
 
   async GenerateIcon(request: GenerateIconRequest): Promise<GenerateIconResponse> {
+    if ([...generations.values()].some((controller) => !controller.signal.aborted)) {
+      return { images: [], error: 'An image generation is already running.' };
+    }
+    const controller = new AbortController();
+    generations.set(request.requestId, controller);
     try {
       const { positive, negative } = buildPrompt(request.prompt);
       const result = await getProvider().generate({
@@ -421,45 +442,65 @@ ipc.registerService(AppServiceDescriptor, {
         negativePrompt: negative,
         referenceImageB64: request.referenceImage || undefined,
         count: 3,
+        signal: controller.signal,
       });
       return { images: result.images, error: '' };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { images: [], error: message };
+    } finally {
+      if (generations.get(request.requestId) === controller) generations.delete(request.requestId);
     }
+  },
+
+  async CancelGeneration(request: CancelGenerationRequest) {
+    generations.get(request.requestId)?.abort();
+    return {};
+  },
+
+  async GetCodexStatus() { return getCodexStatus(); },
+  async StartCodexLogin() { return startCodexLogin((url) => workspace.openUrl(url)); },
+  async CancelCodexLogin() { await cancelCodexLogin(); return {}; },
+
+  async SetGenerationConnection(request: SetGenerationConnectionRequest) {
+    if (process.env.ICON_PROVIDER) throw new Error('The image provider is fixed by the development configuration.');
+    if (request.connection === 'codex') {
+      const status = await getCodexStatus();
+      if (status.state !== 'ready') throw new Error(status.error || 'Connect ChatGPT before continuing.');
+      saveConnection('codex');
+    } else if (request.connection === 'api') {
+      if (!hasApiKeyInPrefs()) throw new Error('Add an API key before continuing.');
+      await listImageModels(detectProviderFromKey(getResolvedApiKey()), getResolvedApiKey(), true);
+      saveConnection('api');
+    } else if (request.connection === 'none') {
+      if ([...generations.values()].some((controller) => !controller.signal.aborted)) {
+        throw new Error('Stop generation before disconnecting.');
+      }
+      saveConnection('none');
+      await cancelCodexLogin();
+    } else throw new Error('Choose ChatGPT or an API key.');
+    return readGenerationSettings();
   },
 
   async GetOpenAIApiKeyStatus(
     _request: GetOpenAIApiKeyStatusRequest
   ): Promise<GetOpenAIApiKeyStatusResponse> {
-    // A key is required for any real image provider (OpenAI or OpenRouter);
-    // only the mock provider needs none.
+    const provider = resolveProviderName();
     return {
-      openaiKeyRequired: resolveProviderName() !== 'mock',
+      openaiKeyRequired: provider === 'openai' || provider === 'openrouter',
       hasOpenaiKey: hasApiKeyInPrefs(),
     };
   },
 
   async GetGenerationSettings(request: GetGenerationSettingsRequest) {
-    const provider = resolveProviderName();
-    const settings = getImageSettings(provider);
-    const base = { provider, ...settings, hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: provider !== 'mock' };
-    if (base.apiKeyRequired && !base.hasApiKey) {
-      return { ...base, models: [], error: '', errorCode: '' };
-    }
-    try {
-      const models = await listImageModels(provider, getResolvedApiKey(), request.refresh);
-      return { ...base, models, error: '', errorCode: '' };
-    } catch (err) {
-      return { ...base, models: [], error: err instanceof Error ? err.message : String(err),
-        errorCode: err instanceof ProviderRequestError ? err.code : '' };
-    }
+    return readGenerationSettings(request.refresh);
   },
 
   async SetGenerationSettings(request: SetGenerationSettingsRequest) {
     try {
       const provider = resolveProviderName();
       if (request.provider !== provider) throw new Error('Your provider changed. Reopen generation settings.');
+      if (provider === 'codex') throw new Error('ChatGPT manages its own image model and quality.');
       await saveImageSettings(provider, getResolvedApiKey(), {
         model: request.model, quality: request.quality,
       });

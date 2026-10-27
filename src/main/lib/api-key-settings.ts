@@ -2,6 +2,7 @@ import { prefs } from "@mobrowser/api";
 import { getImageSettings } from "./generation-settings";
 import { listImageModels } from "./image-models";
 import { API_KEY_PREFS_KEY, detectProviderFromKey } from "./openai-api-key";
+import { CONNECTION_PREF } from "./generation-connection";
 
 /** Disconnect locally while retaining each provider's model preferences. */
 export function removeStoredApiKey(): void {
@@ -20,6 +21,7 @@ export async function saveValidatedApiKey(input: string) {
   if (!apiKey) throw new Error("Enter an API key to continue.");
   const provider = detectProviderFromKey(apiKey);
   const forced = process.env.ICON_PROVIDER?.trim();
+  if (forced === "codex") throw new Error("This app is configured to use ChatGPT.");
   if ((forced === "openai" || forced === "openrouter") && forced !== provider) {
     throw new Error(`This app is configured to use ${forced === "openai" ? "OpenAI" : "OpenRouter"}. Enter a key for that provider.`);
   }
@@ -35,14 +37,19 @@ export async function saveValidatedApiKey(input: string) {
   const hadKey = prefs.hasString(API_KEY_PREFS_KEY);
   const previousKey = prefs.getString(API_KEY_PREFS_KEY);
   const hadSettings = prefs.hasObject(settingsKey);
+  const hadConnection = prefs.hasString(CONNECTION_PREF);
+  const previousConnection = prefs.getString(CONNECTION_PREF);
   prefs.setString(API_KEY_PREFS_KEY, apiKey);
   prefs.setObject(settingsKey, settings);
+  prefs.setString(CONNECTION_PREF, "api");
   if (!prefs.persist()) {
     if (hadKey) prefs.setString(API_KEY_PREFS_KEY, previousKey);
     else prefs.remove(API_KEY_PREFS_KEY);
     if (hadSettings) prefs.setObject(settingsKey, previousSettings);
     else prefs.remove(settingsKey);
+    if (hadConnection) prefs.setString(CONNECTION_PREF, previousConnection);
+    else prefs.remove(CONNECTION_PREF);
     throw new Error("Could not save preferences. Your previous API key has been kept. Try again.");
   }
-  return { provider, ...settings, models, hasApiKey: true, apiKeyRequired: true, error: "", errorCode: "" };
+  return { provider, ...settings, models, hasApiKey: true, apiKeyRequired: true, error: "", errorCode: "", ready: true, codex: undefined };
 }

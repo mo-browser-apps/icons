@@ -30,9 +30,16 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
   };
   const load = mainLoader({ prefs, fetch, env });
   const apiKeys = load(fileURLToPath(new URL("../src/main/lib/api-key-settings.ts", import.meta.url)));
+  const connection = load(fileURLToPath(new URL("../src/main/lib/generation-connection.ts", import.meta.url)));
+  const provider = load(fileURLToPath(new URL("../src/main/lib/image-provider.ts", import.meta.url)));
+  const settings = load(fileURLToPath(new URL("../src/main/lib/read-generation-settings.ts", import.meta.url)));
   return {
     save: apiKeys.saveValidatedApiKey,
     remove: apiKeys.removeStoredApiKey,
+    useConnection: connection.saveConnection,
+    provider: provider.resolveProviderName,
+    getProvider: provider.getProvider,
+    readSettings: settings.readGenerationSettings,
     values, writes: () => writes,
   };
 }
@@ -51,6 +58,53 @@ test("OpenAI validates through the authenticated model list, then preserves a su
   assert.equal(result.hasApiKey, true);
   assert.equal(app.values.get(keyPref), "sk-test");
   assert.equal(app.writes(), 1);
+});
+
+test("existing API users retain their provider; Codex selection persists without removing their key", () => {
+  for (const [key, expected] of [["sk-test", "openai"], ["sk-or-test", "openrouter"]]) {
+    const app = subject(async () => catalog(), { [keyPref]: key });
+    assert.equal(app.provider(), expected);
+    app.useConnection("codex");
+    assert.equal(app.provider(), "codex");
+    assert.equal(app.values.get(keyPref), key);
+    app.useConnection("api");
+    assert.equal(app.provider(), expected);
+    assert.equal(app.values.get(keyPref), key);
+  }
+});
+
+test("failed connection persistence restores the previous provider", () => {
+  for (const initial of [{}, { "imageGeneration.connection": "api" }]) {
+    const app = subject(async () => catalog(), initial, false);
+    assert.throws(() => app.useConnection("codex"), /Could not save/);
+    assert.equal(app.provider(), "openai");
+    assert.deepEqual(Object.fromEntries(app.values), initial);
+  }
+});
+
+test("disconnecting Codex persists across launch and never falls back to a saved API key", async () => {
+  const noRequest = async () => { throw new Error("disconnect must not contact any provider"); };
+  const initial = { [keyPref]: "sk-test", "imageGeneration.connection": "codex" };
+  const app = subject(noRequest, initial);
+  app.useConnection("none");
+  assert.equal(app.values.get(keyPref), initial[keyPref]);
+  for (const instance of [app, subject(noRequest, Object.fromEntries(app.values))]) {
+    const settings = await instance.readSettings();
+    assert.equal(settings.ready, false);
+    assert.equal(settings.provider, "");
+    assert.equal(settings.hasApiKey, true);
+    assert.throws(() => instance.getProvider(), /Choose a generation method/);
+  }
+  app.useConnection("codex");
+  assert.equal(app.provider(), "codex");
+});
+
+test("a failed disconnect keeps Codex selected", () => {
+  const initial = { [keyPref]: "sk-test", "imageGeneration.connection": "codex" };
+  const app = subject(async () => catalog(), initial, false);
+  assert.throws(() => app.useConnection("none"), /Could not save/);
+  assert.deepEqual(Object.fromEntries(app.values), initial);
+  assert.equal(app.provider(), "codex");
 });
 
 test("removing a key disconnects locally while preserving model choices and other preferences", () => {
@@ -125,11 +179,21 @@ test("invalid and management-only OpenRouter keys cannot pass via the public cat
 });
 
 test("failed persistence rolls back key and model preferences, including first setup", async () => {
-  for (const initial of [{}, { [keyPref]: "previous-key", "imageGeneration.openai": { model: "retired", quality: "high" } }]) {
+  for (const initial of [{}, { [keyPref]: "previous-key", "imageGeneration.connection": "codex", "imageGeneration.openai": { model: "retired", quality: "high" } }]) {
     const app = subject(async () => catalog(), initial, false);
     await assert.rejects(app.save("sk-test"), /Could not save preferences/);
     assert.deepEqual(Object.fromEntries(app.values), initial);
   }
+});
+
+test("validating a new key selects the API connection; a rejected key keeps Codex active", async () => {
+  const initial = { "imageGeneration.connection": "codex", [keyPref]: "previous-key" };
+  const accepted = subject(async () => catalog(), initial);
+  await accepted.save("sk-test");
+  assert.equal(accepted.values.get("imageGeneration.connection"), "api");
+  const rejected = subject(async () => new Response("invalid", { status: 401 }), initial);
+  await assert.rejects(rejected.save("sk-test"));
+  assert.deepEqual(Object.fromEntries(rejected.values), initial);
 });
 
 test("empty keys, forced-provider mismatch, malformed replies and empty catalogs never save", async () => {
