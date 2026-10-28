@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, Settings2, Sparkles, X } from "lucide-react"
+import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, Settings2, Sparkles, Trash2, X } from "lucide-react"
 import { ipc } from "@/gen/ipc"
 import type { CodexStatus, GetGenerationSettingsResponse, ImageModelOption } from "@/gen/app"
 
@@ -67,14 +67,21 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     return () => { requestVersion.current++ }
   }, [onReadyChange])
 
-  const editKey = () => {
-    requestVersion.current++
-    setLoading(false)
+  const editKey = async (existingError = "") => {
+    const version = ++requestVersion.current
+    setLoading(!!settings?.hasApiKey)
     setStep("key")
     setApiKey("")
     setShowKey(false)
-    setError("")
+    setError(existingError)
     setOpen(true)
+    if (!settings?.hasApiKey) return
+    try {
+      const response = await ipc.app.GetStoredOpenAIApiKey({})
+      if (version === requestVersion.current) setApiKey(response.apiKey)
+    } catch {
+      if (version === requestVersion.current) setError("Could not load the saved API key. Enter it again to continue.")
+    } finally { if (version === requestVersion.current) setLoading(false) }
   }
 
   useEffect(() => {
@@ -89,7 +96,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
       else if (step === "models") modelInput.current?.focus()
       else dialog.current?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus()
     } else dialog.current?.close()
-  }, [open, step])
+  }, [open, step, loading])
 
   const applySettings = (response: GetGenerationSettingsResponse) => {
     setSettings(response)
@@ -110,16 +117,16 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     if (saving) return
     setKeyBackStep("connection")
     setModelsBackStep("connection")
-    if (!settings?.hasApiKey) { editKey(); return }
+    if (!settings?.hasApiKey) { void editKey(); return }
     setSaving(true)
     setError("")
     try {
       const response = await ipc.app.SetGenerationConnection({ connection: "api" })
       applySettings(response)
-      setStep(response.ready ? "models" : "key")
+      if (response.ready) setStep("models")
+      else void editKey(response.error)
     } catch {
-      setStep("key")
-      setError("Could not connect with the saved API key. Check it or add a new key.")
+      void editKey("Could not connect with the saved API key. Check it or add a new key.")
     } finally { setSaving(false) }
   }
   const checkCodex = useCallback(async (quiet = false) => {
@@ -269,14 +276,15 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
       if (needsConnection(response)) {
         setIsSetupFlow(true)
         setKeyBackStep("connection")
-        setStep(response.provider === "codex" ? "codex" : "key")
+        if (response.provider === "codex") setStep("codex")
+        else void editKey(response.error)
       }
     } catch {
       if (version === requestVersion.current) setError("Could not refresh models. Try again.")
     } finally { if (version === requestVersion.current) setLoading(false) }
   }
   const checkKey = async () => {
-    if (saving || !apiKey.trim()) return
+    if (saving || loading || !apiKey.trim()) return
     const version = ++requestVersion.current
     setSaving(true)
     setError("")
@@ -362,7 +370,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
         }}
         className="dark fixed inset-0 m-auto w-[440px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-48px)] overflow-y-auto rounded-2xl border border-border bg-background text-foreground p-0 shadow-2xl backdrop:bg-black/70 backdrop:backdrop-blur-sm"
       >
-        <div className="px-5 pt-4">
+        <div className="px-5 pt-5">
           <div className="flex items-center justify-between gap-3">
             <h2 id="generation-settings-title" className="text-base font-medium">{step === "connection" ? "Connect to generate" : step === "codex" ? "ChatGPT" : step === "remove" ? "Remove API key?" : step === "key" ? "API key" : "Generation settings"}</h2>
             <button type="button" onClick={close} disabled={saving} aria-label="Close generation settings" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-secondary disabled:opacity-50">
@@ -393,7 +401,6 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 <span className="flex-1"><span className="text-sm font-medium">API key</span><span className="mt-1 block text-xs leading-relaxed text-muted-foreground">Connect OpenAI or OpenRouter.<br />Usage is billed by your provider.</span></span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </button>
-              <p className="pt-1 text-center text-xs text-muted-foreground">You can change this in generation settings anytime.</p>
             </div> : step === "codex" ? <div className="space-y-4">
               <div className="rounded-xl border border-border bg-secondary/40 p-4">
                 <div className="flex items-center gap-3">
@@ -415,21 +422,20 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
             </div> : step === "remove" ? <p className="text-sm text-muted-foreground">You’ll need to add an API key to generate icons again. Your model and effort choices will be kept.</p> : step === "key" ? <div>
-              <label htmlFor="generation-api-key" className="sr-only">{settings?.hasApiKey ? "New API key" : "API key"}</label>
+              <label htmlFor="generation-api-key" className="sr-only">API key</label>
               <div className="relative">
                 <input
                   ref={keyInput} id="generation-api-key" type={showKey ? "text" : "password"}
                   value={apiKey} onChange={(event) => { setApiKey(event.target.value); setError("") }}
-                  placeholder="Your API key" disabled={saving}
+                  placeholder={loading ? "Loading saved key…" : "Your API key"} disabled={saving || loading}
                   autoComplete="off" autoCapitalize="none" spellCheck={false}
                   aria-describedby={error ? "generation-settings-error" : undefined} aria-invalid={!!error}
                   className="w-full h-10 rounded-lg border border-border bg-secondary pl-3 pr-11 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
                 />
-                <button type="button" onClick={() => setShowKey(!showKey)} disabled={saving} aria-label={showKey ? "Hide API key" : "Show API key"} className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground">
+                <button type="button" onClick={() => setShowKey(!showKey)} disabled={saving || loading} aria-label={showKey ? "Hide API key" : "Show API key"} className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground">
                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              {canRemoveKey && <button type="button" disabled={saving} onClick={() => { setError(""); setStep("remove") }} className="mt-4 text-xs text-red-400 hover:text-red-300 disabled:opacity-50">Remove API key</button>}
             </div> : <>
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -468,8 +474,8 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
             </>}
             {error && <p id="generation-settings-error" role="alert" className="text-xs text-red-400">{error}</p>}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-5">
-            {step === "connection" ? <span /> : step === "codex" ? <button type="button" disabled={saving} onClick={chooseConnection} className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" />{codexSelected ? "Change method" : "Back"}</button> : step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
+          {step !== "connection" && <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-5">
+            {step === "codex" ? <button type="button" disabled={saving} onClick={chooseConnection} className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" />{codexSelected ? "Change method" : "Back"}</button> : step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
               : step === "key" ? <div className="flex items-center gap-1">
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenAI <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://openrouter.ai/keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenRouter <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
@@ -478,20 +484,22 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 <button type="button" disabled={saving} onClick={() => {
                   if (isSetupFlow && modelsBackStep === "connection") { chooseConnection(); return }
                   if (!isSetupFlow) setKeyBackStep("models")
-                  editKey()
+                  void editKey()
                 }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">{isSetupFlow ? "Back" : "Change API key"}</button>
                 {!isSetupFlow && <button type="button" disabled={saving} onClick={chooseConnection} className="h-9 px-3 rounded-lg text-xs text-muted-foreground hover:text-foreground">Change method</button>}
               </div> : <span />}
-            {step !== "connection" && <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2">
+              {step === "key" && canRemoveKey && <button type="button" disabled={saving || loading} onClick={() => { setShowKey(false); setError(""); setStep("remove") }} aria-label="Remove API key" title="Remove API key" className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><Trash2 aria-hidden="true" className="h-4 w-4" /></button>}
               {step === "key" && <button type="button" disabled={saving} onClick={() => {
                 if (keyBackStep !== "models" || !settings?.ready || settings.provider === "codex") { chooseConnection(); return }
+                requestVersion.current++; setLoading(false)
                 setApiKey(""); setShowKey(false); setError(settings.error); setStep("models")
               }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button>}
-              <button type="submit" data-autofocus={step === "codex" || undefined} disabled={saving || (step === "codex" ? checkingCodex || !codex || codex.state === "waiting" : step === "remove" ? !canRemoveKey : step === "key" ? !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
+              <button type="submit" data-autofocus={step === "codex" || undefined} disabled={saving || (step === "codex" ? checkingCodex || !codex || codex.state === "waiting" : step === "remove" ? !canRemoveKey : step === "key" ? loading || !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
                 {step === "codex" ? saving ? "Please wait…" : codexActionLabel : step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
               </button>
-            </div>}
-          </div>
+            </div>
+          </div>}
         </form>
       </dialog>, document.body
     )}
