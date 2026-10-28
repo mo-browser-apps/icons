@@ -145,6 +145,14 @@ export function PromptInput({
     }
     const onPaste = (event: ClipboardEvent) => {
       const files = Array.from(event.clipboardData?.files ?? [])
+      // Some clipboard sources expose files only through items. Prefer the
+      // FileList when present so the same image is never attached twice.
+      if (!files.length) {
+        for (const item of Array.from(event.clipboardData?.items ?? [])) {
+          const file = item.kind === "file" ? item.getAsFile() : null
+          if (file) files.push(file)
+        }
+      }
       if (!files.length) return
       event.preventDefault()
       attachFiles(files)

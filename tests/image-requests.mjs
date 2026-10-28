@@ -105,6 +105,19 @@ test("OpenRouter cancels endpoint discovery before starting any generation", asy
   assert.equal(s.calls.length, 0);
 });
 
+test("OpenRouter preserves cancellation while reading the endpoint response body", async () => {
+  const controller = new AbortController();
+  const s = subject("openrouter", success, { lookup: ({ signal }) => ({
+    ok: true,
+    json: () => new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      queueMicrotask(() => controller.abort());
+    }),
+  }) });
+  await assert.rejects(s.generate({ signal: controller.signal }), { name: "AbortError" });
+  assert.equal(s.calls.length, 0);
+});
+
 for (const edit of [false, true]) {
   const reference = edit ? { referenceImageB64: fixtures.png } : {};
   const label = `OpenAI ${edit ? "editing" : "generation"}`;

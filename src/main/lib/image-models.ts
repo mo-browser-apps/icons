@@ -108,6 +108,7 @@ async function getJSON<T>(url: string, apiKey?: string, signal?: AbortSignal): P
   try {
     return await response.json() as T;
   } catch {
+    signal?.throwIfAborted();
     throw new ProviderRequestError("The provider returned an unexpected response. Try again later.", "service");
   }
 }

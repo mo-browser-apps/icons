@@ -24,18 +24,23 @@ const check = (name, fn) => { fn(); console.log(`PASS: ${name}`); };
 const mode = (value) => evaluate((mode) => { window.__regression.mode = mode; return true; }, value);
 const fill = () => agent("fill", "--selector", "textarea", "--value", "Test icon");
 const attach = (file) => { agent("answer-dialog", "--path", file); click("Attach reference image"); ready(); };
-const event = (kind, format = "png", count = 1) => evaluate(async (kind, format, count, fixtures) => {
+const event = (kind, format = "png", count = 1, itemsOnly = false) => evaluate(async (kind, format, count, fixtures, itemsOnly) => {
   const transfer = new DataTransfer();
   const blob = await (await fetch(`data:image/${format};base64,${fixtures[format]}`)).blob();
   for (let i = 0; i < count; i++) transfer.items.add(new File([blob], `reference.${format}`, { type: `image/${format}` }));
+  if (count === 0) transfer.setData("text/plain", "Clipboard text");
   const target = document.querySelector("textarea");
   if (kind === "drop") target.dispatchEvent(new DragEvent("dragover", { dataTransfer: transfer, bubbles: true, cancelable: true }));
   const e = kind === "paste" ? new ClipboardEvent(kind, { clipboardData: transfer, bubbles: true, cancelable: true })
     : new DragEvent(kind, { dataTransfer: transfer, bubbles: true, cancelable: true });
+  // Exercise clipboard platforms exposing file items without a populated FileList.
+  if (kind === "paste" && itemsOnly) Object.defineProperty(e, "clipboardData", {
+    value: { files: [], items: transfer.items },
+  });
   target.dispatchEvent(e);
   await new Promise((resolve) => setTimeout(resolve, 50));
   return e.defaultPrevented;
-}, kind, format, count, fixtures);
+}, kind, format, count, fixtures, itemsOnly);
 
 for (const [format, base64] of Object.entries({ ...fixtures, gif: "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" })) {
   writeFileSync(path.join(output, `reference.${format}`), Buffer.from(base64, "base64"));
@@ -86,6 +91,20 @@ try {
     });
   }
   check("paste attaches one image", () => { assert.ok(event("paste")); ready(); assert.ok(reference().startsWith("data:image/png;")); });
+  check("clipboard file items attach when the FileList is empty", () => {
+    assert.ok(event("paste", "jpeg", 1, true)); ready();
+    assert.ok(reference().startsWith("data:image/jpeg;"));
+  });
+  const pasted = reference();
+  check("multiple clipboard file items are rejected without replacing the reference", () => {
+    assert.ok(event("paste", "png", 2, true)); ready();
+    assert.match(evaluate(() => document.querySelector('[role="alert"]').textContent), /one reference/);
+    assert.equal(reference(), pasted);
+  });
+  check("text-only clipboard items retain normal paste behavior", () => {
+    assert.equal(event("paste", "png", 0, true), false);
+    assert.equal(reference(), pasted);
+  });
   check("drop replaces the reference and prevents navigation", () => { assert.ok(event("drop", "webp")); ready(); assert.ok(reference().startsWith("data:image/webp;")); });
   const dropped = reference();
   check("multiple dropped images are rejected without silently picking one", () => {
@@ -131,7 +150,8 @@ try {
     }));
     agent("press-key", "--key", "Enter");
     assert.ok(evaluate(() => !!document.querySelector('[aria-label="Stop"]')));
-    assert.ok(event("drop")); assert.ok(event("paste")); assert.equal(reference(), attachedBeforeStop);
+    assert.ok(event("drop")); assert.ok(event("paste")); assert.ok(event("paste", "png", 1, true));
+    assert.equal(reference(), attachedBeforeStop);
   });
   click("Stop");
   check("Stop restores all prior variants", () => assert.deepEqual(variants(), previous));
@@ -163,7 +183,8 @@ try {
   check("refinement clearly uses the selected icon and disables attachments", () => {
     assert.ok(evaluate(() => document.body.textContent.includes("Using the selected icon as the reference.")));
     assert.ok(evaluate(() => document.querySelector('[aria-label="Attach reference image"]').disabled));
-    assert.ok(event("paste")); assert.ok(event("drop")); assert.equal(reference(), null);
+    assert.ok(event("paste")); assert.ok(event("drop")); assert.ok(event("paste", "png", 1, true));
+    assert.equal(reference(), null);
   });
   const base = variants("img");
   fill(); mode("pause"); click("Submit"); click("Stop");
@@ -175,7 +196,7 @@ try {
     return s.calls.at(-1).referenceImage === (await generatedImageToPngDataURL(s.fixtures.webp)).split(",")[1];
   })));
 } finally {
-  evaluate(() => { const s = window.__regression; Object.assign(s.ipc.app, s.originals); location.reload(); return true; });
+  evaluate(() => { const s = window.__regression; if (s) Object.assign(s.ipc.app, s.originals); location.reload(); return true; });
   wait("textarea");
 }
 console.log(`PASS: release UI regressions. Picker fixtures: ${output}`);
