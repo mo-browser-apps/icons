@@ -107,16 +107,31 @@ export async function withRetry<T>(
   fn: () => Promise<T>,
   maxAttempts = 3,
   initialDelayMs = 1_000,
-  shouldRetry: (error: unknown) => boolean = () => true
+  shouldRetry: (error: unknown) => boolean = () => true,
+  signal?: AbortSignal
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    signal?.throwIfAborted();
     try {
-      return await fn();
+      const result = await fn();
+      signal?.throwIfAborted();
+      return result;
     } catch (err) {
+      signal?.throwIfAborted();
       lastError = err;
       if (attempt < maxAttempts && shouldRetry(err)) {
-        await new Promise<void>((r) => setTimeout(r, initialDelayMs * attempt));
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => {
+            clearTimeout(timer);
+            reject(signal!.reason);
+          };
+          const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          }, initialDelayMs * attempt);
+          signal?.addEventListener("abort", onAbort, { once: true });
+        });
       } else {
         throw err;
       }

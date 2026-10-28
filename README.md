@@ -18,8 +18,9 @@ https://github.com/user-attachments/assets/1c87f99d-993f-408b-bd32-a1eb6552eada
 
 - **Prompt-based generation.** Your text is wrapped in fixed system constraints, so outputs stay on-brand for macOS-style icons (centered subject, no text, squircle-friendly composition, etc.).
 - **Up to three variants per run.** Compare images and choose your favorite. The ChatGPT connection generates variants in sequence and keeps completed artwork if a later variant fails.
-- **Optional reference image.** Attach a PNG to steer the model (for example a sketch, logo, or earlier render).
+- **Optional reference image.** Attach, paste or drop one PNG, JPEG, WebP or GIF to steer the model (for example a sketch, logo, or earlier render). A new attachment replaces the current reference.
 - **Refine workflow.** After you confirm one variant, new generations use its original artwork as the reference. Export masks, margins and shadows are kept out of model edits so they do not accumulate.
+- **Keep your work.** Stopping or failing regeneration preserves the previous variants and selection. Stop cancels active requests and retries; requests already processed by the service may still count toward usage.
 - **Preview.** Generated artwork is prepared as a 1024×1024 PNG with a macOS 15 contour, transparent margins, smooth edges and a soft outer shadow. The UI displays this finished PNG without adding another mask or shadow.
 - **Export & Save.** The same finished PNG is resized into all standard **`.iconset`** sizes and packed into **`.icns`**, including its transparency and shadow. The saved file carries its own shape for Finder, Dock and DMG windows.
 
@@ -58,8 +59,14 @@ MōIcons detects the Codex executable bundled with the ChatGPT desktop app, olde
 Run provider and connection tests without API calls:
 
 ```bash
-node --test tests/api-key-settings.mjs tests/image-models.mjs tests/openrouter.mjs tests/codex.mjs
+node --test tests/api-key-settings.mjs tests/image-models.mjs tests/openrouter.mjs tests/codex.mjs tests/image-requests.mjs
 ```
+
+For attachment, cancellation and refinement regressions, start
+`ICON_PROVIDER=mock npm run dev -- --automation`, then run
+`node tests/release-regressions.mjs` in another terminal. The check resets the
+renderer, answers native file dialogs automatically, and isolates generation
+replies without calling an image provider or changing connection settings.
 
 ## Build
 

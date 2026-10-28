@@ -7,7 +7,7 @@ import ts from "typescript";
 const require = createRequire(import.meta.url);
 
 // Run actual main-process modules with isolated preferences and HTTP.
-export function mainLoader({ prefs, fetch, env = {} }) {
+export function mainLoader({ prefs, fetch, env = {}, timers = {} }) {
   const cache = new Map();
   return function load(file) {
     if (cache.has(file)) return cache.get(file).exports;
@@ -19,9 +19,9 @@ export function mainLoader({ prefs, fetch, env = {} }) {
     const localRequire = (id) => id === "@mobrowser/api" ? { prefs }
       : id.startsWith(".") ? load(path.resolve(path.dirname(file), id + ".ts")) : require(id);
     vm.runInNewContext(`(function(require, module, exports) {${source}\n})`, {
-      Buffer, URL, Error, process: { env }, console, fetch, AbortSignal, AbortController,
-      setTimeout: (callback, delay) => setTimeout(callback, delay <= 2000 ? 0 : delay),
-      clearTimeout,
+      Buffer, URL, Error, process: { env }, console, fetch, AbortSignal, AbortController, FormData, Blob,
+      setTimeout: timers.setTimeout ?? ((callback, delay) => setTimeout(callback, delay <= 2000 ? 0 : delay)),
+      clearTimeout: timers.clearTimeout ?? clearTimeout,
     })(localRequire, module, module.exports);
     return module.exports;
   };
