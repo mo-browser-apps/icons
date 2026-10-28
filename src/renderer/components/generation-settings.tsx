@@ -389,7 +389,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
           else if (step === "key") void checkKey()
           else void save()
         }} aria-busy={saving || loading}>
-          <div className="px-5 py-5 space-y-4">
+          <div className={`px-5 ${step === "remove" && !error ? "pt-5" : "py-5"} space-y-4`}>
             {step === "connection" ? <div className="space-y-3">
               <button type="button" data-autofocus disabled={saving} onClick={() => { setError(""); setStep("codex") }} className="group flex w-full items-center gap-3 rounded-xl border border-border bg-secondary/30 p-4 text-left transition-colors hover:border-primary/50 hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Sparkles className="h-5 w-5" /></span>
@@ -421,7 +421,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
-            </div> : step === "remove" ? <p className="text-sm text-muted-foreground">You’ll need to add an API key to generate icons again. Your model and effort choices will be kept.</p> : step === "key" ? <div>
+            </div> : step === "remove" ? null : step === "key" ? <div>
               <label htmlFor="generation-api-key" className="sr-only">API key</label>
               <div className="relative">
                 <input
@@ -477,6 +477,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
           {step !== "connection" && <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-5">
             {step === "codex" ? <button type="button" disabled={saving} onClick={chooseConnection} className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" />{codexSelected ? "Change method" : "Back"}</button> : step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
               : step === "key" ? <div className="flex items-center gap-1">
+                {canRemoveKey && <button type="button" disabled={saving || loading} onClick={() => { setShowKey(false); setError(""); setStep("remove") }} aria-label="Remove API key" title="Remove API key" className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><Trash2 aria-hidden="true" className="h-4 w-4" /></button>}
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenAI <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://openrouter.ai/keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenRouter <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
               </div>
@@ -489,7 +490,6 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 {!isSetupFlow && <button type="button" disabled={saving} onClick={chooseConnection} className="h-9 px-3 rounded-lg text-xs text-muted-foreground hover:text-foreground">Change method</button>}
               </div> : <span />}
             <div className="ml-auto flex items-center gap-2">
-              {step === "key" && canRemoveKey && <button type="button" disabled={saving || loading} onClick={() => { setShowKey(false); setError(""); setStep("remove") }} aria-label="Remove API key" title="Remove API key" className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><Trash2 aria-hidden="true" className="h-4 w-4" /></button>}
               {step === "key" && <button type="button" disabled={saving} onClick={() => {
                 if (keyBackStep !== "models" || !settings?.ready || settings.provider === "codex") { chooseConnection(); return }
                 requestVersion.current++; setLoading(false)
