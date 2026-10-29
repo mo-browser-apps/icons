@@ -211,7 +211,7 @@ export function PromptInput({
         style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.15) transparent" }}
       />
 
-      <div className="px-1.5 pb-2 text-xs text-muted-foreground" aria-live="polite">
+      <div className="sr-only" aria-live="polite">
         {referenceLocked
           ? "Using the selected icon as the reference."
           : attachmentLoading
