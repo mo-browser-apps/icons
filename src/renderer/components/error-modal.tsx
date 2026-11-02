@@ -38,10 +38,12 @@ export function generationErrorSuggestsConnectionIssue(message: string): boolean
 }
 
 export function ErrorModal({
+  title = "Generation failed",
   message,
   onClose,
   onOpenSettings,
 }: {
+  title?: string
   message: string
   onClose: () => void
   onOpenSettings?: () => void
@@ -77,7 +79,7 @@ export function ErrorModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border">
-          <span className="text-sm font-medium text-destructive">Generation failed</span>
+          <span className="text-sm font-medium text-destructive">{title}</span>
           <button
             onClick={onClose}
             className="flex items-center justify-center w-6 h-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"

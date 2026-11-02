@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { Download } from "lucide-react"
+import { Download, History } from "lucide-react"
+import { IconHistory } from "@/components/icon-history"
+import type { GetIconHistoryResponse } from "@/gen/app"
 import { MacOSIcon } from "@/components/macos-icon"
 import { PromptInput, type PrimaryAction } from "@/components/prompt-input"
 import { GenerationSettings } from "@/components/generation-settings"
@@ -24,16 +26,29 @@ export function AppContent() {
   // Original artwork for model edits; baseIconSrc is the finished export PNG.
   const [rawBaseIconSrc, setRawBaseIconSrc] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [errorTitle, setErrorTitle] = useState("Generation failed")
   const [saveSuccess, setSaveSuccess] = useState<{ folderPath: string; icnsPath: string } | null>(
     null
   )
-  const [iconDirty, setIconDirty] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [baseHistoryId, setBaseHistoryId] = useState("")
+  const [removedIds, setRemovedIds] = useState<Set<string>>(new Set())
+  const [historyRevision, setHistoryRevision] = useState(0)
+  const [savingExport, setSavingExport] = useState(false)
   const [connectionReady, setConnectionReady] = useState<boolean | null>(null)
   const [connectionRequest, setConnectionRequest] = useState(0)
   const resumeAfterCancelRef = useRef<ResumeAfterCancel>("idle")
+  const unarchivedSelection = useRef<number | null>(null)
 
   const pipeline = useIconPipeline()
-  const prevPipelineStatusRef = useRef(pipeline.status)
+
+  useEffect(() => {
+    const selected = unarchivedSelection.current
+    if (selected !== null && pipeline.historyIds[selected]) {
+      setBaseHistoryId(pipeline.historyIds[selected])
+      unarchivedSelection.current = null
+    }
+  }, [pipeline.historyIds])
 
   // Sync iconState with pipeline status changes.
   useEffect(() => {
@@ -46,26 +61,13 @@ export function AppContent() {
       setIconState(resumeAfterCancelRef.current)
       // Surface the error in a modal. Strip the "Error: " prefix added by the pipeline.
       const raw = pipeline.progress.label
+      setErrorTitle("Generation failed")
       setErrorMessage(raw.startsWith("Error: ") ? raw.slice(7) : raw)
     }
   }, [pipeline.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    const was = prevPipelineStatusRef.current
-    prevPipelineStatusRef.current = pipeline.status
-    if (pipeline.status !== "done") return
-    if (!pipeline.variants.some((v) => v !== null)) return
-    if (was !== "done") {
-      setIconDirty(true)
-    }
-  }, [pipeline.status, pipeline.variants])
-
-  useEffect(() => {
-    ipc.app.SetUnsavedIconState({ unsaved: iconDirty }).catch(() => {})
-  }, [iconDirty])
-
   const startGeneration = () => {
-    if (!prompt.trim() || iconState === "generating" || attachmentLoading) return
+    if (!prompt.trim() || iconState === "generating" || attachmentLoading || pipeline.historyError || savingExport) return
     if (!connectionReady) {
       setConnectionRequest((request) => request + 1)
       return
@@ -76,23 +78,55 @@ export function AppContent() {
     // In refine mode the confirmed variant is the reference; otherwise use the
     // user-attached image (if any).
     const referenceImage = iconState === "refine" ? rawBaseIconSrc : attachment
-    pipeline.generate(prompt, referenceImage ?? undefined)
+    pipeline.generate(prompt, referenceImage ?? undefined, iconState === "refine" && !removedIds.has(baseHistoryId) ? baseHistoryId : "")
   }
 
   const stopGeneration = () => {
+    if (pipeline.status === "saving") return
     pipeline.cancel()
     setIconState(resumeAfterCancelRef.current)
   }
 
   const confirmSelectedVariant = () => {
     if (iconState !== "generated" || selectedVariant === null) return
-    setIconDirty(true)
     setBaseIconSrc(pipeline.variants[selectedVariant])
     setRawBaseIconSrc(pipeline.rawVariants[selectedVariant])
+    setBaseHistoryId(pipeline.historyIds[selectedVariant] || "")
+    unarchivedSelection.current = pipeline.historyIds[selectedVariant] ? null : selectedVariant
     setIconState("refine")
     setSelectedVariant(null)
     setPrompt("")
     setAttachment(null)
+  }
+
+  const continueFromHistory = (saved: GetIconHistoryResponse) => {
+    if (!saved.entry) return
+    setBaseIconSrc(saved.preparedPng)
+    setRawBaseIconSrc(saved.rawPng)
+    setBaseHistoryId(saved.entry.id)
+    unarchivedSelection.current = null
+    setIconState("refine")
+    setSelectedVariant(null)
+    setPrompt("")
+    setAttachment(null)
+    setHistoryOpen(false)
+  }
+
+  const saveIcon = async (historyId: string, preparedSrc?: string | null) => {
+    if (savingExport) return
+    setSavingExport(true)
+    try {
+      const imageData = historyId ? new Uint8Array() : new Uint8Array(await (await fetch(preparedSrc!)).arrayBuffer())
+      const saved = await ipc.app.SaveIcon({ imageData, historyId })
+      if (!saved.canceled && saved.icnsPath) {
+        setSaveSuccess({ folderPath: saved.savedPath, icnsPath: saved.icnsPath })
+        setHistoryRevision(value => value + 1)
+        if (saved.historyWarning) {
+          setErrorTitle("History location wasn’t updated")
+          setErrorMessage(saved.historyWarning)
+        }
+      }
+    } finally { setSavingExport(false) }
   }
 
   const handleSave = async () => {
@@ -107,17 +141,11 @@ export function AppContent() {
     if (!preparedSrc) return
 
     try {
-      // Fetch the object URL and convert to Uint8Array for IPC transfer.
-      const response = await fetch(preparedSrc)
-      const buffer = await response.arrayBuffer()
-      const imageData = new Uint8Array(buffer)
-      const saved = await ipc.app.SaveIcon({ imageData })
-      if (!saved.canceled && saved.icnsPath) {
-        setIconDirty(false)
-        setSaveSuccess({ folderPath: saved.savedPath, icnsPath: saved.icnsPath })
-      }
-    } catch {
-      // Silently ignore IPC errors.
+      const id = iconState === "refine" ? baseHistoryId : pipeline.historyIds[selectedVariant!]
+      await saveIcon(id && !removedIds.has(id) ? id : "", preparedSrc)
+    } catch (error) {
+      setErrorTitle("Icon couldn’t be saved")
+      setErrorMessage(error instanceof Error ? error.message : "Try saving the icon again.")
     }
   }
 
@@ -159,7 +187,7 @@ export function AppContent() {
   const canSave = iconState === "refine" && baseIconSrc != null
 
   const showStatus =
-    pipeline.status === "downloading" && pipeline.progress.label !== ""
+    (pipeline.status === "downloading" || pipeline.status === "saving") && pipeline.progress.label !== ""
 
   return (
     <div className="dark flex flex-col h-screen bg-background text-foreground overflow-hidden">
@@ -167,6 +195,7 @@ export function AppContent() {
 
       {errorMessage && (
         <ErrorModal
+          title={errorTitle}
           message={errorMessage}
           onClose={() => setErrorMessage(null)}
           onOpenSettings={
@@ -200,10 +229,14 @@ export function AppContent() {
         />
       )}
 
-      {/* Save button — top right corner. */}
-      <div className="absolute top-3 right-3 z-50">
+      <div className="absolute top-3 right-3 z-40 flex items-center gap-2">
+        <button type="button" aria-pressed={historyOpen} disabled={iconState === "generating" || !!pipeline.historyError || savingExport}
+          onClick={() => setHistoryOpen(value => !value)}
+          className={cn("flex items-center gap-2 px-3 h-8 rounded-lg text-xs font-medium non-draggable disabled:opacity-40", historyOpen ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground")}>
+          <History className="w-3.5 h-3.5" />History
+        </button>
         <button
-          disabled={!canSave}
+          disabled={!canSave || historyOpen || savingExport}
           onClick={handleSave}
           className={cn(
             "flex items-center gap-2 px-4 h-8 rounded-lg text-sm font-medium transition-all duration-200 non-draggable",
@@ -213,9 +246,19 @@ export function AppContent() {
           )}
         >
           <Download className="w-3.5 h-3.5" />
-          Save
+          {savingExport ? "Saving…" : "Save"}
         </button>
       </div>
+
+      {pipeline.historyError && <div className="absolute top-14 left-4 right-4 z-40 rounded-lg bg-amber-950 text-amber-100 px-3 py-2 text-xs" role="alert">
+        {pipeline.historyError} <button className="underline ml-1" onClick={() => void pipeline.retryHistory()} disabled={pipeline.retryingHistory}>{pipeline.retryingHistory ? "Saving…" : "Try again"}</button>
+      </div>}
+
+      {historyOpen && <IconHistory onClose={() => setHistoryOpen(false)} onContinue={continueFromHistory}
+        onSave={id => saveIcon(id)} onRemoved={id => setRemovedIds(previous => new Set([...previous, id]))}
+        revision={historyRevision + pipeline.historyRevision} />}
+
+      <div className="flex min-h-0 flex-1 flex-col" inert={historyOpen} style={{ visibility: historyOpen ? "hidden" : undefined }}>
 
       {/* Icon preview — pinned to top, centered horizontally. */}
       <div className="flex justify-center pt-28 pb-20 px-10">
@@ -235,9 +278,9 @@ export function AppContent() {
           onChange={setPrompt}
           primaryAction={primaryAction}
           onPrimary={onPrimary}
-          primaryEnabled={primaryEnabled && !attachmentLoading}
+          primaryEnabled={primaryEnabled && !attachmentLoading && pipeline.status !== "saving" && !savingExport && (!pipeline.historyError || primaryAction === "select")}
           onRegenerate={primaryAction === "select" ? startGeneration : undefined}
-          regenerateEnabled={prompt.trim().length > 0 && !attachmentLoading}
+          regenerateEnabled={prompt.trim().length > 0 && !attachmentLoading && !pipeline.historyError && !savingExport}
           inputDisabled={iconState === "generating"}
           referenceLocked={iconState === "refine"}
           placeholder={inputPlaceholder}
@@ -250,6 +293,7 @@ export function AppContent() {
             onReadyChange={setConnectionReady}
           />}
         />
+      </div>
       </div>
     </div>
   )
