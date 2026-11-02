@@ -20,6 +20,8 @@ message SaveIconRequest {
   // Finished 1024×1024 PNG shown in preview: macOS 15 contour, transparent
   // margins and outer shadow included. Never send the raw model artwork.
   bytes image_data = 1;
+  // When reopening history, export the stored preview and remember its location.
+  string history_id = 2;
 }
 
 message SaveIconResponse {
@@ -27,6 +29,48 @@ message SaveIconResponse {
   bool canceled = 2;
   // Full path to the saved .icns file when the save succeeded.
   string icns_path = 3;
+  string history_warning = 4;
+}
+
+message HistoryVariantInput {
+  int32 variant_index = 1;
+  string raw_png = 2;
+  string prepared_png = 3;
+  string thumbnail_png = 4;
+}
+
+message RecordIconHistoryRequest {
+  string generation_id = 1;
+  string prompt = 2;
+  string parent_id = 3;
+  repeated HistoryVariantInput variants = 4;
+}
+
+message IconHistoryEntry {
+  string id = 1;
+  string generation_id = 2;
+  string prompt = 3;
+  string created_at = 4;
+  int32 variant_index = 5;
+  string thumbnail = 6;
+  string export_path = 7;
+  string parent_id = 8;
+}
+
+message ListIconHistoryRequest {
+  // Offset in generations. Each page contains up to eight complete generations.
+  int32 offset = 1;
+}
+message ListIconHistoryResponse {
+  repeated IconHistoryEntry entries = 1;
+  bool has_more = 2;
+  string warning = 3;
+}
+message IconHistoryIdRequest { string id = 1; }
+message GetIconHistoryResponse {
+  IconHistoryEntry entry = 1;
+  string raw_png = 2;
+  string prepared_png = 3;
 }
 
 message ShowPathInFinderRequest {
@@ -149,6 +193,11 @@ message PickReferenceImageResponse {
 }
 
 service AppService {
+  rpc RecordIconHistory(RecordIconHistoryRequest) returns (ListIconHistoryResponse);
+  rpc ListIconHistory(ListIconHistoryRequest) returns (ListIconHistoryResponse);
+  rpc GetIconHistory(IconHistoryIdRequest) returns (GetIconHistoryResponse);
+  rpc RemoveIconHistory(IconHistoryIdRequest) returns (google.protobuf.Empty);
+  rpc RevealIconHistoryExport(IconHistoryIdRequest) returns (google.protobuf.Empty);
   rpc GetApplicationMetadata(google.protobuf.Empty) returns (ApplicationMetadata);
   rpc SetTheme(SetThemeRequest) returns (google.protobuf.Empty);
   rpc SetUnsavedIconState(SetUnsavedIconStateRequest) returns (google.protobuf.Empty);

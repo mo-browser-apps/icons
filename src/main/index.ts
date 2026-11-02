@@ -2,6 +2,7 @@ import './sentry';
 import { app, BrowserWindow, workspace, ipc, Menu, MenuItem, MenuWithRole, Theme } from '@mobrowser/api';
 import { exec } from 'node:child_process';
 import { preserveSmallIconAlpha } from './lib/icns-alpha';
+import { IconHistoryStore } from './lib/icon-history';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -245,6 +246,12 @@ app.setMenu(appMenu)
 // ---------------------------------------------------------------------------
 
 let hasUnsavedIcon = false;
+let historyStore: IconHistoryStore | undefined;
+function iconHistory() {
+  const dataDirectory = app.getPath('userData');
+  if (!dataDirectory) throw new Error('The application data folder is unavailable.');
+  return historyStore ??= new IconHistoryStore(path.join(dataDirectory, 'icon-history'));
+}
 const generations = new Map<string, AbortController>();
 
 async function closeGenerationSessions() {
@@ -279,7 +286,7 @@ win.handle('close', async () => {
     type: 'warning',
     title: 'Quit without saving?',
     message:
-      'Your icon has not been saved. If you quit now, it will be lost.',
+      'Some generated icons have not been kept in History. If you quit now, those variants will be lost.',
     buttons: [
       { label: 'Cancel', type: 'secondary' },
       { label: 'Quit Anyway', type: 'primary' },
@@ -297,6 +304,29 @@ win.handle('close', async () => {
 // ---------------------------------------------------------------------------
 
 ipc.registerService(AppServiceDescriptor, {
+  async RecordIconHistory(request) {
+    const entries = await iconHistory().record(request);
+    hasUnsavedIcon = false;
+    return { entries, hasMore: false, warning: '' };
+  },
+  async ListIconHistory(request) {
+    return iconHistory().list(request.offset);
+  },
+  async GetIconHistory(request) {
+    return iconHistory().get(request.id);
+  },
+  async RemoveIconHistory(request) {
+    await iconHistory().remove(request.id);
+    return {};
+  },
+  async RevealIconHistoryExport(request) {
+    const { entry } = await iconHistory().get(request.id);
+    if (!entry.exportPath) throw new Error('This icon has not been exported yet. Choose Save as… first.');
+    try { await fs.access(entry.exportPath); }
+    catch { throw new Error('The exported file was moved or deleted. You can save another copy from History.'); }
+    workspace.showPath(entry.exportPath);
+    return {};
+  },
   async GetApplicationMetadata() {
     return {
       name: app.name,
@@ -315,7 +345,18 @@ ipc.registerService(AppServiceDescriptor, {
   },
 
   async SaveIcon(request: SaveIconRequest): Promise<SaveIconResponse> {
+    const stored = request.historyId ? await iconHistory().get(request.historyId) : null;
+    const imageData = stored ? Buffer.from(stored.preparedPng.split(',')[1], 'base64') : request.imageData;
+    const savedResult = async (savedPath: string, icnsPath: string): Promise<SaveIconResponse> => {
+      let historyWarning = '';
+      if (request.historyId) {
+        try { await iconHistory().setExportPath(request.historyId, icnsPath); }
+        catch { historyWarning = 'Your icon was exported, but its location could not be remembered in History.'; }
+      }
+      return { savedPath, icnsPath, canceled: false, historyWarning };
+    };
     let saveDialogDefault = path.join(app.getPath('userHome'), 'Desktop', 'app.icns');
+    if (stored?.entry.exportPath) saveDialogDefault = stored.entry.exportPath;
 
     for (;;) {
       const pick = await app.showSaveDialog({
@@ -328,7 +369,7 @@ ipc.registerService(AppServiceDescriptor, {
       });
 
       if (pick.canceled || !pick.path) {
-        return { savedPath: '', canceled: true, icnsPath: '' };
+        return { savedPath: '', canceled: true, icnsPath: '', historyWarning: '' };
       }
 
       const { parentDir, icnsPath, iconsetDir } = resolveSaveTargets(pick.path);
@@ -351,20 +392,18 @@ ipc.registerService(AppServiceDescriptor, {
 
         if (confirm.button.type === 'primary') {
           await removeIcnsOutputs(icnsPath, iconsetDir);
-          await buildIcnsAt(request.imageData, iconsetDir, icnsPath);
-          hasUnsavedIcon = false;
-          return { savedPath: parentDir, canceled: false, icnsPath };
+          await buildIcnsAt(imageData, iconsetDir, icnsPath);
+          return savedResult(parentDir, icnsPath);
         }
         if (confirm.button.type === 'regular') {
           saveDialogDefault = icnsPath;
           continue;
         }
-        return { savedPath: '', canceled: true, icnsPath: '' };
+        return { savedPath: '', canceled: true, icnsPath: '', historyWarning: '' };
       }
 
-      await buildIcnsAt(request.imageData, iconsetDir, icnsPath);
-      hasUnsavedIcon = false;
-      return { savedPath: parentDir, canceled: false, icnsPath };
+      await buildIcnsAt(imageData, iconsetDir, icnsPath);
+      return savedResult(parentDir, icnsPath);
     }
   },
 
@@ -442,6 +481,8 @@ ipc.registerService(AppServiceDescriptor, {
         count: 3,
         signal: controller.signal,
       });
+      if (controller.signal.aborted) return { images: [], error: 'Generation stopped.' };
+      if (result.images.length) hasUnsavedIcon = true;
       return { images: result.images, error: '' };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
