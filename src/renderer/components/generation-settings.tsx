@@ -440,7 +440,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                     </div>
                   </div>
                   {codexMissing ? <div className="ml-auto flex shrink-0 flex-col gap-2">
-                    <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="h-8 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Browse…</button>
+                    <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="h-9 rounded-lg bg-primary px-4 text-xs font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Browse…</button>
                     <button type="button" disabled={saving || checkingCodex} onClick={() => void checkCodex()} className="h-8 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Check again</button>
                   </div> : codexSelected && <button type="button" disabled={saving || checkingCodex} onClick={() => void disconnectCodex()} aria-label="Disconnect from MōIcons" aria-describedby="codex-disconnect-description" className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Disconnect</button>}
                 </div>
@@ -457,7 +457,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
-              {!codexMissing && !savedAppPath && codex?.state !== "waiting" && <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="flex h-8 items-center gap-2 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><FolderOpen aria-hidden="true" className="h-3.5 w-3.5" />Browse…</button>}
+              {!codexMissing && !savedAppPath && codex?.state !== "waiting" && <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-xs font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><FolderOpen aria-hidden="true" className="h-3.5 w-3.5" />Browse…</button>}
             </div> : step === "remove" ? null : step === "key" ? <div>
               <label htmlFor="generation-api-key" className="sr-only">API key</label>
               <div className="relative">
