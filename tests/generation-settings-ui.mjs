@@ -128,9 +128,15 @@ try {
     state.mountCodex = () => {
       state.savedPath = "";
       state.pathWrites = [];
+      state.statusReads = 0;
+      state.connectionWrites = 0;
       state.settings = { ...state.settings, provider: "codex", ready: false, codex: { state: "not_installed", email: "", error: "" } };
       ipc.app.CancelCodexLogin = async () => ({});
-      ipc.app.GetCodexStatus = async () => ({ state: state.savedPath ? "ready" : "not_installed", email: state.savedPath ? "test@example.com" : "", error: "" });
+      ipc.app.GetCodexStatus = async () => {
+        state.statusReads++;
+        return { state: state.savedPath ? "ready" : "not_installed", email: state.savedPath ? "test@example.com" : "", error: "" };
+      };
+      ipc.app.SetGenerationConnection = async () => { state.connectionWrites++; return state.settings; };
       ipc.app.GetCodexAppPath = () => state.pathMode === "delay-read"
         ? new Promise((resolve) => { state.resolvePathRead = resolve; })
         : Promise.resolve({ appPath: state.savedPath, error: "" });
@@ -231,6 +237,14 @@ try {
 
   await evaluate(() => window.__settingsTest.mountCodex());
   await wait(() => document.querySelector("dialog[open]")?.textContent.includes("Already installed? Set app location"));
+  assert.equal(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].filter((button) => button.textContent.trim() === "Check again").length), 1);
+  assert.equal(await evaluate(() => !!document.querySelector('dialog[open] [aria-label="Disconnect from MōIcons"], dialog[open] #codex-disconnect-description')), false);
+  const statusReads = await evaluate(() => window.__settingsTest.statusReads);
+  await click("Check again");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));
+  assert.equal(await evaluate(() => window.__settingsTest.statusReads), statusReads + 1);
+  assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), 0);
+  check("missing-app card retries detection without disconnecting or showing a duplicate action");
   await screenshot("chatgpt-not-found");
   await click("Already installed? Set app location");
   await wait(() => document.activeElement?.id === "chatgpt-app-path");

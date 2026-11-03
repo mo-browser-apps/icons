@@ -44,6 +44,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const [error, setError] = useState("")
   const codexSelected = settings?.provider === "codex"
   const codexConnected = codexSelected && settings.ready && codex?.state === "ready" && settings.codex?.email === codex.email
+  const codexMissing = codex?.state === "not_installed"
   const requestVersion = useRef(0)
   const dialog = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -451,12 +452,12 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                       <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{codexDescription}</p>
                     </div>
                   </div>
-                  {codexSelected && <button type="button" disabled={saving || checkingCodex} onClick={() => void disconnectCodex()} aria-label="Disconnect from MōIcons" aria-describedby="codex-disconnect-description" className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Disconnect</button>}
+                  {(codexSelected || codexMissing) && <button type="button" disabled={saving || checkingCodex} onClick={() => void (codexMissing ? checkCodex() : disconnectCodex())} aria-label={codexMissing ? "Check again" : "Disconnect from MōIcons"} aria-describedby={codexMissing ? undefined : "codex-disconnect-description"} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">{codexMissing ? "Check again" : "Disconnect"}</button>}
                 </div>
-                {codexSelected && <p id="codex-disconnect-description" className="mt-3 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>}
+                {codexSelected && !codexMissing && <p id="codex-disconnect-description" className="mt-3 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>}
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">Generation uses your plan’s allowance and available credits. Usage starts when you press Generate.</p>
-              {!codexConnected && <div className="flex items-center gap-4 text-xs">
+              {!codexConnected && !codexMissing && <div className="flex items-center gap-4 text-xs">
                 <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
