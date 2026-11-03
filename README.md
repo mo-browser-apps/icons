@@ -6,7 +6,7 @@ Choose **ChatGPT** or an **API key** in the setup wizard. You can change the con
 
 For ChatGPT, check the account shown, then select **Use this account**. MōIcons finds your existing sign-in, or offers browser sign-in with ChatGPT. Install the current [ChatGPT desktop app](https://learn.chatgpt.com/docs/app) to connect. If the app is missing or needs updating, the wizard offers instructions and checks again when you return. Codex CLI installations are also supported.
 
-If ChatGPT is installed but cannot be found, select **Already installed? Set app location** and paste the full path to its `.app` bundle. MōIcons checks the connection before saving. This location takes priority over all automatic detection and environment overrides until you change it or select **Use automatic detection** under **App location**.
+If ChatGPT is installed but cannot be found, select **Already installed? Set app location** and paste the full path to its `.app` bundle. MōIcons checks the connection before saving. This location takes priority over all automatic detection and environment overrides. To restore automatic detection, open **App location**, clear the path, and select **Use automatic detection**. **Back** leaves the saved location unchanged.
 
 Connecting does not generate images. Usage starts when you press **Generate** and uses your Codex allowance and available credits; account limits apply. ChatGPT manages image model and quality. In generation settings, **Change method** lets you choose an API key; **Disconnect from MōIcons** pauses generation until you choose a method again, keeping any saved API key. Neither action signs you out of ChatGPT.
 

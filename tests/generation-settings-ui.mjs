@@ -278,14 +278,25 @@ try {
   await click("App location");
   await wait(() => document.querySelector("#chatgpt-app-path")?.value === window.__settingsTest.savedPath);
   assert.equal(await evaluate(() => document.querySelector("#chatgpt-app-path").value), customPath);
+  assert.equal(await evaluate(() => [...document.querySelectorAll('dialog[open] button[type="button"]')].some((button) => button.textContent.trim() === "Use automatic detection")), false);
   await screenshot("chatgpt-location-saved");
   check("save disables duplicate actions, refreshes the connection, and reopens with the saved path");
 
+  await fillPath("");
+  await click("Back");
+  await wait(() => document.querySelector("dialog[open]")?.textContent.includes("test@example.com"));
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), customPath);
+  assert.deepEqual(await evaluate(() => window.__settingsTest.pathWrites), ["/missing/ChatGPT.app", customPath]);
+  await click("App location");
+  await wait(() => document.querySelector("#chatgpt-app-path")?.value === window.__settingsTest.savedPath);
+  check("Back discards path edits and keeps the saved location");
+
+  await fillPath("");
   await click("Use automatic detection");
   await wait(() => document.querySelector("dialog[open]")?.textContent.includes("Already installed? Set app location"));
   assert.equal(await evaluate(() => window.__settingsTest.savedPath), "");
   assert.deepEqual(await evaluate(() => window.__settingsTest.pathWrites), ["/missing/ChatGPT.app", customPath, ""]);
-  check("automatic detection clears the explicit location and checks again");
+  check("saving an empty path restores automatic detection and checks again");
 
   await evaluate(() => { window.__settingsTest.pathMode = "delay-read"; });
   await click("Already installed? Set app location");

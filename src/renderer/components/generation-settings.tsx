@@ -173,13 +173,13 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     }).finally(() => { if (version === requestVersion.current) setLoading(false) })
     return () => { requestVersion.current++ }
   }, [open, step])
-  const saveAppLocation = async (automatic = false) => {
-    if (saving || loading || (!automatic && !appPath.trim())) return
+  const saveAppLocation = async () => {
+    if (saving || loading || (!appPath.trim() && !savedAppPath)) return
     const version = ++requestVersion.current
     setSaving(true)
     setError("")
     try {
-      const response = await ipc.app.SetCodexAppPath({ appPath: automatic ? "" : appPath })
+      const response = await ipc.app.SetCodexAppPath({ appPath: appPath.trim() ? appPath : "" })
       if (version !== requestVersion.current) return
       if (response.error) { setError(response.error); return }
       setSavedAppPath(response.appPath)
@@ -474,8 +474,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                   aria-describedby={`chatgpt-app-path-help${error ? " generation-settings-error" : ""}`} aria-invalid={!!error}
                   className="h-10 w-full rounded-lg border border-border bg-secondary px-3 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-50" />
               </div>
-              <p id="chatgpt-app-path-help" className="text-xs leading-relaxed text-muted-foreground">In Finder, select your ChatGPT app and press <kbd className="font-sans text-foreground">⌥⌘C</kbd> to copy its path. MōIcons will always use this location until you change it.</p>
-              {!!savedAppPath && <button type="button" disabled={saving || loading} onClick={() => void saveAppLocation(true)} className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Use automatic detection</button>}
+              <p id="chatgpt-app-path-help" className="text-xs leading-relaxed text-muted-foreground">In Finder, select your ChatGPT app and press <kbd className="font-sans text-foreground">⌥⌘C</kbd> to copy its path. MōIcons will use this location until you change it.{savedAppPath && " Clear the path and save to restore automatic detection."}</p>
             </div> : step === "remove" ? null : step === "key" ? <div>
               <label htmlFor="generation-api-key" className="sr-only">API key</label>
               <div className="relative">
@@ -550,8 +549,8 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 requestVersion.current++; setLoading(false)
                 setApiKey(""); setShowKey(false); setError(settings.error); setStep("models")
               }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button>}
-              <button type="submit" data-autofocus={step === "codex" || undefined} disabled={saving || (step === "codex" ? checkingCodex || !codex || codex.state === "waiting" : step === "codex-path" ? loading || !appPath.trim() : step === "remove" ? !canRemoveKey : step === "key" ? loading || !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
-                {step === "codex" ? saving ? "Please wait…" : codexActionLabel : step === "codex-path" ? saving ? "Checking…" : "Use this app" : step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
+              <button type="submit" data-autofocus={step === "codex" || undefined} disabled={saving || (step === "codex" ? checkingCodex || !codex || codex.state === "waiting" : step === "codex-path" ? loading || (!appPath.trim() && !savedAppPath) : step === "remove" ? !canRemoveKey : step === "key" ? loading || !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
+                {step === "codex" ? saving ? "Please wait…" : codexActionLabel : step === "codex-path" ? saving ? "Checking…" : savedAppPath && !appPath.trim() ? "Use automatic detection" : "Use this app" : step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
               </button>
             </div>
           </div>}
