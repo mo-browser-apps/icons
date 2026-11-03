@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, Settings2, Sparkles, Trash2, X } from "lucide-react"
+import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Eye, EyeOff, FolderOpen, KeyRound, RefreshCw, Settings2, Sparkles, Trash2, X } from "lucide-react"
 import { ipc } from "@/gen/ipc"
 import type { CodexStatus, GetGenerationSettingsResponse, ImageModelOption } from "@/gen/app"
 
@@ -19,7 +19,7 @@ function savedDraft(settings: GetGenerationSettingsResponse) {
 }
 
 const needsConnection = (settings: GetGenerationSettingsResponse) => !settings.ready
-type Step = "connection" | "codex" | "codex-path" | "key" | "models" | "remove"
+type Step = "connection" | "codex" | "key" | "models" | "remove"
 
 export function GenerationSettings({ disabled, connectionRequest, onReadyChange }: {
   disabled: boolean
@@ -32,7 +32,6 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const [step, setStep] = useState<Step>("connection")
   const [codex, setCodex] = useState<CodexStatus | null>(null)
   const [checkingCodex, setCheckingCodex] = useState(false)
-  const [appPath, setAppPath] = useState("")
   const [savedAppPath, setSavedAppPath] = useState("")
   const [isSetupFlow, setIsSetupFlow] = useState(false)
   const [keyBackStep, setKeyBackStep] = useState<"connection" | "models">("connection")
@@ -49,7 +48,6 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const dialog = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const keyInput = useRef<HTMLInputElement>(null)
-  const appPathInput = useRef<HTMLInputElement>(null)
   const modelInput = useRef<HTMLSelectElement>(null)
   const cancelRemoval = useRef<HTMLButtonElement>(null)
 
@@ -96,7 +94,6 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     if (open) {
       dialog.current?.showModal()
       if (step === "key") keyInput.current?.focus()
-      else if (step === "codex-path" && !loading) appPathInput.current?.focus()
       else if (step === "remove") cancelRemoval.current?.focus()
       else if (step === "models") modelInput.current?.focus()
       else dialog.current?.querySelector<HTMLButtonElement>("[data-autofocus]")?.focus()
@@ -139,9 +136,13 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     if (!quiet) setCheckingCodex(true)
     setError("")
     try {
-      const response = await ipc.app.GetCodexStatus({})
+      const [response, location] = await Promise.all([
+        ipc.app.GetCodexStatus({}),
+        ipc.app.GetCodexAppPath({}).catch(() => null),
+      ])
       if (version !== requestVersion.current) return
       setCodex(response)
+      if (location) setSavedAppPath(location.appPath)
       setError(response.state === "update_required" ? "" : response.error)
       return response
     } catch {
@@ -157,35 +158,23 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     void checkCodex()
     return () => { requestVersion.current++; void ipc.app.CancelCodexLogin({}).catch(() => {}) }
   }, [open, step, checkCodex])
-  useEffect(() => {
-    if (!open || step !== "codex-path") return
-    const version = ++requestVersion.current
-    setLoading(true)
-    setAppPath("")
-    setSavedAppPath("")
-    ipc.app.GetCodexAppPath({}).then((response) => {
-      if (version !== requestVersion.current) return
-      setAppPath(response.appPath)
-      setSavedAppPath(response.appPath)
-      setError(response.error)
-    }).catch(() => {
-      if (version === requestVersion.current) setError("Could not read the saved location. You can enter it again.")
-    }).finally(() => { if (version === requestVersion.current) setLoading(false) })
-    return () => { requestVersion.current++ }
-  }, [open, step])
-  const saveAppLocation = async () => {
-    if (saving || loading || (!appPath.trim() && !savedAppPath)) return
+  const chooseAppLocation = async (automatic = false) => {
+    if (saving || checkingCodex || codex?.state === "waiting") return
     const version = ++requestVersion.current
     setSaving(true)
     setError("")
     try {
-      const response = await ipc.app.SetCodexAppPath({ appPath: appPath.trim() ? appPath : "" })
+      let appPath = ""
+      if (!automatic) {
+        const pick = await ipc.app.PickCodexApp({})
+        if (version !== requestVersion.current || pick.canceled) return
+        appPath = pick.appPath
+      }
+      const response = await ipc.app.SetCodexAppPath({ appPath })
       if (version !== requestVersion.current) return
       if (response.error) { setError(response.error); return }
       setSavedAppPath(response.appPath)
-      setCodex(null)
-      if (codexSelected) onReadyChange(false)
-      setStep("codex")
+      await checkCodex()
     } catch {
       if (version === requestVersion.current) setError("Could not save the app location. Try again.")
     } finally { setSaving(false) }
@@ -220,13 +209,13 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   }
   const codexAction = async () => {
     if (saving || checkingCodex || !codex) return
-    if (codexConnected) { close(); return }
+    if (codexConnected || codexMissing) { close(); return }
     if (codex.state === "waiting") return
     if (codex.state === "error") { await checkCodex(); return }
     setSaving(true)
     setError("")
     try {
-      if (codex.state === "not_installed" || codex.state === "update_required") {
+      if (codex.state === "update_required") {
         await ipc.app.OpenExternalUrl({ url: "https://learn.chatgpt.com/docs/app" })
       } else if (codex.state === "ready") {
         const response = await ipc.app.SetGenerationConnection({ connection: "codex" })
@@ -262,14 +251,14 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const codexDescription = checkingCodex ? "Looking for the ChatGPT desktop app and your saved sign-in."
     : codex?.state === "ready" ? codex.email || "Your ChatGPT account"
     : codex?.state === "waiting" ? "Complete sign-in in your browser. This screen will update automatically."
-    : codex?.state === "not_installed" ? "Install the ChatGPT desktop app, or set its location if it’s already installed."
+    : codex?.state === "not_installed" ? "Choose the ChatGPT app on your Mac, or check again."
     : codex?.state === "update_required" ? "Get the latest ChatGPT desktop app. We’ll check again when you return."
     : codex?.state === "error" ? "Check that the ChatGPT desktop app opens on this Mac, then try again."
     : "Continue in your browser to sign in with your ChatGPT account."
   const codexActionLabel = checkingCodex || !codex ? "Checking…"
     : codexConnected ? "Done"
     : codex.state === "ready" ? "Use this account"
-    : codex.state === "not_installed" ? "Install ChatGPT"
+    : codex.state === "not_installed" ? "Done"
     : codex.state === "update_required" ? "Update ChatGPT"
     : codex.state === "error" ? "Try again"
     : codex.state === "waiting" ? "Waiting for sign-in…" : "Sign in with ChatGPT"
@@ -410,21 +399,19 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
       >
         <div className="px-5 pt-5">
           <div className="flex items-center justify-between gap-3">
-            <h2 id="generation-settings-title" className="text-base font-medium">{step === "connection" ? "Connect to generate" : step === "codex" ? "ChatGPT" : step === "codex-path" ? "Locate ChatGPT" : step === "remove" ? "Remove API key?" : step === "key" ? "API key" : "Generation settings"}</h2>
+            <h2 id="generation-settings-title" className="text-base font-medium">{step === "connection" ? "Connect to generate" : step === "codex" ? "ChatGPT" : step === "remove" ? "Remove API key?" : step === "key" ? "API key" : "Generation settings"}</h2>
             <button type="button" onClick={close} disabled={saving} aria-label="Close generation settings" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-secondary disabled:opacity-50">
               <X className="w-4 h-4" />
             </button>
           </div>
           {step !== "models" && <p id="generation-settings-description" className="text-xs text-muted-foreground mt-1">{step === "connection"
             ? "Choose how MōIcons generates your icons." : step === "codex"
-            ? "Generate with your ChatGPT account through the desktop app." : step === "codex-path"
-            ? "Paste the full path to your ChatGPT app." : step === "remove"
+            ? "Generate with your ChatGPT account through the desktop app." : step === "remove"
             ? "Remove the saved key from MōIcons." : "Connect OpenAI or OpenRouter to generate icons."}</p>}
         </div>
         <form onSubmit={(event) => {
           event.preventDefault()
           if (step === "codex") void codexAction()
-          else if (step === "codex-path") void saveAppLocation()
           else if (step === "remove") void removeKey()
           else if (step === "key") void checkKey()
           else void save()
@@ -443,8 +430,8 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
               </button>
             </div> : step === "codex" ? <div className="space-y-4">
               <div className="rounded-xl border border-border bg-secondary/40 p-4">
-                <div className="flex items-center gap-3">
-                  <div role="status" aria-live="polite" className="flex min-w-0 flex-1 items-start gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div role="status" aria-live="polite" className="flex min-w-[180px] flex-1 items-start gap-3">
                     <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${codexConnected ? "bg-emerald-500/10 text-emerald-400" : "bg-secondary text-muted-foreground"}`}>
                       {checkingCodex || codex?.state === "waiting" ? <RefreshCw className="h-4 w-4 animate-spin" /> : codexConnected ? <Check className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
                     </span>
@@ -452,29 +439,25 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                       <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{codexDescription}</p>
                     </div>
                   </div>
-                  {(codexSelected || codexMissing) && <button type="button" disabled={saving || checkingCodex} onClick={() => void (codexMissing ? checkCodex() : disconnectCodex())} aria-label={codexMissing ? "Check again" : "Disconnect from MōIcons"} aria-describedby={codexMissing ? undefined : "codex-disconnect-description"} className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">{codexMissing ? "Check again" : "Disconnect"}</button>}
+                  {codexMissing ? <div className="ml-auto flex shrink-0 flex-col gap-2">
+                    <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="h-8 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Browse…</button>
+                    <button type="button" disabled={saving || checkingCodex} onClick={() => void checkCodex()} className="h-8 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Check again</button>
+                  </div> : codexSelected && <button type="button" disabled={saving || checkingCodex} onClick={() => void disconnectCodex()} aria-label="Disconnect from MōIcons" aria-describedby="codex-disconnect-description" className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Disconnect</button>}
                 </div>
                 {codexSelected && !codexMissing && <p id="codex-disconnect-description" className="mt-3 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>}
+                {!!savedAppPath && <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+                  <FolderOpen aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span title={savedAppPath} aria-label={`Selected app: ${savedAppPath}`} className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{savedAppPath}</span>
+                  {!codexMissing && <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void chooseAppLocation()} className="h-7 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Change…</button>}
+                  <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void chooseAppLocation(true)} aria-label="Use automatic detection" title="Use automatic detection" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><X aria-hidden="true" className="h-3.5 w-3.5" /></button>
+                </div>}
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">Generation uses your plan’s allowance and available credits. Usage starts when you press Generate.</p>
               {!codexConnected && !codexMissing && <div className="flex items-center gap-4 text-xs">
                 <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
-              {codex?.state !== "waiting" && <button type="button" disabled={saving || checkingCodex} onClick={() => { setError(""); setLoading(true); setStep("codex-path") }} className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">
-                {codex?.state === "not_installed" ? "Already installed? Set app location" : "App location"}
-              </button>}
-            </div> : step === "codex-path" ? <div className="space-y-3">
-              <div>
-                <label htmlFor="chatgpt-app-path" className="mb-2 block text-sm font-medium">ChatGPT app location</label>
-                <input ref={appPathInput} id="chatgpt-app-path" value={appPath}
-                  onChange={(event) => { setAppPath(event.target.value); setError("") }}
-                  placeholder={loading ? "Loading saved location…" : "/Applications/ChatGPT.app"}
-                  disabled={saving || loading} autoComplete="off" autoCapitalize="none" spellCheck={false}
-                  aria-describedby={`chatgpt-app-path-help${error ? " generation-settings-error" : ""}`} aria-invalid={!!error}
-                  className="h-10 w-full rounded-lg border border-border bg-secondary px-3 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-50" />
-              </div>
-              <p id="chatgpt-app-path-help" className="text-xs leading-relaxed text-muted-foreground">In Finder, select your ChatGPT app and press <kbd className="font-sans text-foreground">⌥⌘C</kbd> to copy its path. MōIcons will use this location until you change it.{savedAppPath && " Clear the path and save to restore automatic detection."}</p>
+              {!codexMissing && !savedAppPath && codex?.state !== "waiting" && <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="flex h-8 items-center gap-2 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><FolderOpen aria-hidden="true" className="h-3.5 w-3.5" />Browse…</button>}
             </div> : step === "remove" ? null : step === "key" ? <div>
               <label htmlFor="generation-api-key" className="sr-only">API key</label>
               <div className="relative">
@@ -529,7 +512,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
             {error && <p id="generation-settings-error" role="alert" className="text-xs text-red-400">{error}</p>}
           </div>
           {step !== "connection" && <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-5">
-            {step === "codex-path" ? <button type="button" disabled={saving} onClick={() => { setError(""); setLoading(false); setStep("codex") }} className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" />Back</button> : step === "codex" ? <button type="button" disabled={saving} onClick={chooseConnection} className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" />{codexSelected ? "Change method" : "Back"}</button> : step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
+            {step === "codex" ? <button type="button" disabled={saving} onClick={chooseConnection} className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" />{codexSelected ? "Change method" : "Back"}</button> : step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
               : step === "key" ? <div className="flex items-center gap-1">
                 {canRemoveKey && <button type="button" disabled={saving || loading} onClick={() => { setShowKey(false); setError(""); setStep("remove") }} aria-label="Remove API key" title="Remove API key" className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><Trash2 aria-hidden="true" className="h-4 w-4" /></button>}
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenAI <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
@@ -549,8 +532,8 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 requestVersion.current++; setLoading(false)
                 setApiKey(""); setShowKey(false); setError(settings.error); setStep("models")
               }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Back</button>}
-              <button type="submit" data-autofocus={step === "codex" || undefined} disabled={saving || (step === "codex" ? checkingCodex || !codex || codex.state === "waiting" : step === "codex-path" ? loading || (!appPath.trim() && !savedAppPath) : step === "remove" ? !canRemoveKey : step === "key" ? loading || !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
-                {step === "codex" ? saving ? "Please wait…" : codexActionLabel : step === "codex-path" ? saving ? "Checking…" : savedAppPath && !appPath.trim() ? "Use automatic detection" : "Use this app" : step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
+              <button type="submit" data-autofocus={step === "codex" || undefined} disabled={saving || (step === "codex" ? checkingCodex || !codex || codex.state === "waiting" : step === "remove" ? !canRemoveKey : step === "key" ? loading || !apiKey.trim() : loading || !selected)} className={`h-9 px-4 rounded-lg text-xs font-medium disabled:opacity-40 ${step === "remove" ? "bg-red-500 text-white hover:bg-red-600" : "bg-primary text-primary-foreground"}`}>
+                {step === "codex" ? saving ? "Please wait…" : codexActionLabel : step === "remove" ? saving ? "Removing…" : "Remove key" : saving ? step === "key" ? "Checking…" : "Saving…" : step === "key" ? "Continue" : "Done"}
               </button>
             </div>
           </div>}

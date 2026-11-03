@@ -500,6 +500,19 @@ ipc.registerService(AppServiceDescriptor, {
 
   async GetCodexStatus() { return getCodexStatus(); },
   async GetCodexAppPath() { return { appPath: getCodexAppPath(), error: '' }; },
+  async PickCodexApp() {
+    const pick = await app.showOpenDialog({
+      parentWindow: win,
+      title: 'Choose ChatGPT',
+      message: 'Select the ChatGPT app on your Mac.',
+      buttonLabelOpen: 'Use this app',
+      defaultPath: getCodexAppPath() || '/Applications',
+      selectionPolicy: 'files',
+      filters: [{ name: 'Applications', extensions: ['app'] }],
+      features: { canCreateDirectories: false, treatPackageAsDirectories: false },
+    });
+    return { appPath: pick.paths[0] || '', canceled: pick.canceled || pick.paths.length === 0 };
+  },
   async SetCodexAppPath(request) {
     return setCodexAppPath(request.appPath, () => [...generations.values()].some((controller) => !controller.signal.aborted));
   },

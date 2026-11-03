@@ -109,6 +109,11 @@ message CodexAppPathResponse {
   string error = 2;
 }
 
+message PickCodexAppResponse {
+  string app_path = 1;
+  bool canceled = 2;
+}
+
 message SetGenerationConnectionRequest {
   // codex or api (checked before saving), or none to disconnect only MōIcons.
   string connection = 1;
@@ -217,6 +222,7 @@ service AppService {
   rpc CancelGeneration(CancelGenerationRequest) returns (google.protobuf.Empty);
   rpc GetCodexStatus(google.protobuf.Empty) returns (CodexStatus);
   rpc GetCodexAppPath(google.protobuf.Empty) returns (CodexAppPathResponse);
+  rpc PickCodexApp(google.protobuf.Empty) returns (PickCodexAppResponse);
   rpc SetCodexAppPath(SetCodexAppPathRequest) returns (CodexAppPathResponse);
   rpc StartCodexLogin(google.protobuf.Empty) returns (CodexStatus);
   rpc CancelCodexLogin(google.protobuf.Empty) returns (google.protobuf.Empty);

@@ -136,10 +136,19 @@ try {
         state.statusReads++;
         return { state: state.savedPath ? "ready" : "not_installed", email: state.savedPath ? "test@example.com" : "", error: "" };
       };
-      ipc.app.SetGenerationConnection = async () => { state.connectionWrites++; return state.settings; };
-      ipc.app.GetCodexAppPath = () => state.pathMode === "delay-read"
-        ? new Promise((resolve) => { state.resolvePathRead = resolve; })
-        : Promise.resolve({ appPath: state.savedPath, error: "" });
+      ipc.app.SetGenerationConnection = async ({ connection }) => {
+        state.connectionWrites++;
+        state.settings = { ...state.settings, ready: connection === "codex", codex: { state: "ready", email: "test@example.com", error: "" } };
+        return state.settings;
+      };
+      state.pickMode = "cancel";
+      state.externalUrls = [];
+      ipc.app.OpenExternalUrl = async ({ url }) => { state.externalUrls.push(url); return {}; };
+      ipc.app.GetCodexAppPath = async () => ({ appPath: state.savedPath, error: "" });
+      ipc.app.PickCodexApp = async () => {
+        if (state.pickMode === "delay") await new Promise((resolve) => { state.resolvePick = resolve; });
+        return { appPath: state.pickedPath || "", canceled: state.pickMode === "cancel" };
+      };
       ipc.app.SetCodexAppPath = async ({ appPath }) => {
         state.pathWrites.push(appPath);
         if (state.pathMode === "delay-save") await new Promise((resolve) => { state.resolvePathSave = resolve; });
@@ -236,77 +245,78 @@ try {
   await click("Close generation settings");
 
   await evaluate(() => window.__settingsTest.mountCodex());
-  await wait(() => document.querySelector("dialog[open]")?.textContent.includes("Already installed? Set app location"));
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));
   assert.equal(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].filter((button) => button.textContent.trim() === "Check again").length), 1);
   assert.equal(await evaluate(() => !!document.querySelector('dialog[open] [aria-label="Disconnect from MōIcons"], dialog[open] #codex-disconnect-description')), false);
+  assert.equal(await evaluate(() => document.querySelector("dialog[open]").textContent.includes("Install ChatGPT")), false);
+  assert.equal(await evaluate(() => document.querySelector("dialog[open]").textContent.includes("Set app location")), false);
   const statusReads = await evaluate(() => window.__settingsTest.statusReads);
   await click("Check again");
   await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));
   assert.equal(await evaluate(() => window.__settingsTest.statusReads), statusReads + 1);
   assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), 0);
-  check("missing-app card retries detection without disconnecting or showing a duplicate action");
+  check("missing-app card offers Browse and retries detection without disconnecting");
   await screenshot("chatgpt-not-found");
-  await click("Already installed? Set app location");
-  await wait(() => document.activeElement?.id === "chatgpt-app-path");
-  assert.equal(await evaluate(() => document.querySelector("dialog[open] button[type=submit]").disabled), true);
-  await screenshot("chatgpt-location");
-  await click("Back");
+
+  await evaluate(() => { window.__settingsTest.pickMode = "delay"; });
+  await click("Browse…");
+  assert.ok(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].every((button) => button.disabled)));
+  await evaluate(() => { window.__settingsTest.pickMode = "cancel"; window.__settingsTest.resolvePick(); });
+  await wait(() => !!document.querySelector("dialog[open] button[type=submit]:not(:disabled)"));
   assert.equal(await evaluate(() => window.__settingsTest.pathWrites.length), 0);
-  check("missing-app hint opens a focused path editor; backing out does not save");
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "ChatGPT");
+  check("canceling the native picker leaves settings unchanged and stays on the same screen");
 
-  const fillPath = async (value) => {
-    if (!command) { agent("fill", "--selector", "dialog[open] #chatgpt-app-path", "--value", value); return; }
-    await evaluate(() => { const input = document.querySelector("dialog[open] #chatgpt-app-path"); input.focus(); input.select(); });
-    await command("Input.insertText", { text: value });
-  };
-  await click("Already installed? Set app location");
-  await evaluate(() => { window.__settingsTest.pathMode = "invalid"; });
-  await fillPath("/missing/ChatGPT.app");
-  await click("Use this app");
+  await evaluate(() => { const state = window.__settingsTest; state.pickMode = "success"; state.pickedPath = "/missing/ChatGPT.app"; state.pathMode = "invalid"; });
+  await click("Browse…");
   await wait(() => !!document.querySelector("dialog[open] [role=alert]"));
-  assert.equal(await evaluate(() => document.querySelector("#chatgpt-app-path").value), "/missing/ChatGPT.app");
   assert.equal(await evaluate(() => window.__settingsTest.savedPath), "");
-  check("invalid location preserves the draft and shows a useful error");
+  check("invalid selected apps show an inline error without saving");
 
-  await evaluate(() => { window.__settingsTest.pathMode = "delay-save"; });
-  const customPath = "/Users/test/Applications/ChatGPT Personal.app";
-  await fillPath(customPath);
-  await click("Use this app");
-  assert.ok(await evaluate(() => [...document.querySelectorAll("dialog[open] input, dialog[open] button")].every((element) => element.disabled)));
+  const customPath = "/Applications/ChatGPT.app";
+  await evaluate((appPath) => { const state = window.__settingsTest; state.pickedPath = appPath; state.pathMode = "delay-save"; }, customPath);
+  await click("Browse…");
+  assert.ok(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].every((button) => button.disabled)));
   await evaluate(() => { window.__settingsTest.pathMode = "success"; window.__settingsTest.resolvePathSave(); });
   await wait(() => document.querySelector("dialog[open]")?.textContent.includes("test@example.com"));
-  await click("App location");
-  await wait(() => document.querySelector("#chatgpt-app-path")?.value === window.__settingsTest.savedPath);
-  assert.equal(await evaluate(() => document.querySelector("#chatgpt-app-path").value), customPath);
-  assert.equal(await evaluate(() => [...document.querySelectorAll('dialog[open] button[type="button"]')].some((button) => button.textContent.trim() === "Use automatic detection")), false);
-  await screenshot("chatgpt-location-saved");
-  check("save disables duplicate actions, refreshes the connection, and reopens with the saved path");
-
-  await fillPath("");
-  await click("Back");
-  await wait(() => document.querySelector("dialog[open]")?.textContent.includes("test@example.com"));
   assert.equal(await evaluate(() => window.__settingsTest.savedPath), customPath);
-  assert.deepEqual(await evaluate(() => window.__settingsTest.pathWrites), ["/missing/ChatGPT.app", customPath]);
-  await click("App location");
-  await wait(() => document.querySelector("#chatgpt-app-path")?.value === window.__settingsTest.savedPath);
-  check("Back discards path edits and keeps the saved location");
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "ChatGPT");
+  await click("Use this account");
+  await wait(() => !document.querySelector("dialog[open]"));
+  await click("Generation settings");
+  await wait(() => document.querySelector("dialog[open]")?.textContent.includes("Connected to MōIcons"));
+  assert.equal(await evaluate(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent), customPath);
+  await screenshot("chatgpt-app-selected");
+  check("selected app is validated, connects, and remains visible after reopening settings");
 
-  await fillPath("");
+  await evaluate(() => { const state = window.__settingsTest; state.pathMode = "invalid"; state.pickedPath = "/Applications/Other.app"; });
+  await click("Change…");
+  await wait(() => !!document.querySelector("dialog[open] [role=alert]"));
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), customPath);
+  assert.equal(await evaluate(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent), customPath);
+  check("an invalid replacement keeps the previously selected app");
+
+  const replacementPath = "/Users/test/Applications/ChatGPT Personal.app";
+  await evaluate((appPath) => { const state = window.__settingsTest; state.pathMode = "success"; state.pickedPath = appPath; }, replacementPath);
+  await click("Change…");
+  await wait(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent === window.__settingsTest.savedPath);
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), replacementPath);
+  check("Change opens the picker and replaces the saved app");
+
   await click("Use automatic detection");
-  await wait(() => document.querySelector("dialog[open]")?.textContent.includes("Already installed? Set app location"));
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));
   assert.equal(await evaluate(() => window.__settingsTest.savedPath), "");
-  assert.deepEqual(await evaluate(() => window.__settingsTest.pathWrites), ["/missing/ChatGPT.app", customPath, ""]);
-  check("saving an empty path restores automatic detection and checks again");
+  assert.equal(await evaluate(() => !!document.querySelector('[aria-label^="Selected app:"]')), false);
+  assert.deepEqual(await evaluate(() => window.__settingsTest.pathWrites), ["/missing/ChatGPT.app", customPath, "/Applications/Other.app", replacementPath, ""]);
+  check("clearing the selected app restores automatic detection");
 
-  await evaluate(() => { window.__settingsTest.pathMode = "delay-read"; });
-  await click("Already installed? Set app location");
-  assert.equal(await evaluate(() => document.querySelector("#chatgpt-app-path").disabled), true);
-  await click("Back");
-  await evaluate(() => { window.__settingsTest.pathMode = "success"; window.__settingsTest.resolvePathRead({ appPath: "/stale/ChatGPT.app", error: "" }); });
-  await click("Already installed? Set app location");
-  await wait(() => !!document.querySelector("#chatgpt-app-path:not(:disabled)"));
-  assert.equal(await evaluate(() => document.querySelector("#chatgpt-app-path").value), "");
-  check("late location reads cannot overwrite a newly opened editor");
+  const connectionWrites = await evaluate(() => window.__settingsTest.connectionWrites);
+  await click("Done");
+  await wait(() => !document.querySelector("dialog[open]"));
+  assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), connectionWrites);
+  assert.deepEqual(await evaluate(() => window.__settingsTest.externalUrls), []);
+  check("Done closes a missing-app state without installing or changing the connection");
+
 } finally {
   await evaluate(() => {
     const state = window.__settingsTest;
