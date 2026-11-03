@@ -1,4 +1,5 @@
-import { CodexClient, CodexCompatibilityError, findCodex } from "./codex-client";
+import { CodexClient, CodexCompatibilityError, CodexNotInstalledError } from "./codex-client";
+import { codexExecutablePath, getCodexAppPath, persistCodexAppPath, validateCodexAppPath } from "./codex-location";
 
 export interface CodexStatus {
   state: "not_installed" | "update_required" | "signed_out" | "waiting" | "ready" | "error";
@@ -12,7 +13,6 @@ let loginError = "";
 
 export async function getCodexStatus(): Promise<CodexStatus> {
   if (starting || login) return { state: "waiting", email: "", error: "" };
-  if (!await findCodex()) return { state: "not_installed", email: "", error: "" };
   let client: CodexClient | undefined;
   try {
     client = await CodexClient.start();
@@ -20,8 +20,36 @@ export async function getCodexStatus(): Promise<CodexStatus> {
     if (account?.type === "chatgpt") loginError = "";
     return { state: account?.type === "chatgpt" ? "ready" : "signed_out", email: account?.type === "chatgpt" ? account.email || "" : "", error: loginError };
   } catch (error) {
+    if (error instanceof CodexNotInstalledError) return { state: "not_installed", email: "", error: "" };
     return { state: error instanceof CodexCompatibilityError ? "update_required" : "error", email: "", error: error instanceof Error ? error.message : "Could not connect to ChatGPT." };
   } finally { await client?.dispose(); }
+}
+
+let savingLocation = false;
+export async function setCodexAppPath(input: string, isGenerating: () => boolean = () => false) {
+  if (savingLocation) return { appPath: getCodexAppPath(), error: "An app location is already being checked. Please wait." };
+  savingLocation = true;
+  let client: CodexClient | undefined;
+  try {
+    if (isGenerating()) throw new Error("Wait for generation to finish before changing the ChatGPT app location.");
+    await cancelCodexLogin();
+    const appPath = input.trim() ? await validateCodexAppPath(input) : "";
+    if (appPath) {
+      client = await CodexClient.start(codexExecutablePath(appPath));
+      // Validate compatibility without signing in or generating an image.
+      await client.request<CodexAccount>("account/read", { refreshToken: false });
+      await client.dispose();
+      client = undefined;
+    }
+    if (isGenerating()) throw new Error("Wait for generation to finish before changing the ChatGPT app location.");
+    persistCodexAppPath(appPath);
+    return { appPath, error: "" };
+  } catch (error) {
+    return { appPath: getCodexAppPath(), error: error instanceof Error ? error.message : "Could not save the app location. Try again." };
+  } finally {
+    await client?.dispose();
+    savingLocation = false;
+  }
 }
 
 export async function cancelCodexLogin() {

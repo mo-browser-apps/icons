@@ -35,7 +35,8 @@ import { saveImageSettings } from './lib/generation-settings';
 import { removeStoredApiKey, saveValidatedApiKey } from './lib/api-key-settings';
 import { readGenerationSettings } from './lib/read-generation-settings';
 import { setGenerationConnection } from './lib/set-generation-connection';
-import { getCodexStatus, startCodexLogin, cancelCodexLogin } from './lib/codex-account';
+import { getCodexStatus, startCodexLogin, cancelCodexLogin, setCodexAppPath } from './lib/codex-account';
+import { getCodexAppPath } from './lib/codex-location';
 import { closeCodexSessions } from './lib/codex-client';
 import {
   getResolvedApiKey,
@@ -498,6 +499,23 @@ ipc.registerService(AppServiceDescriptor, {
   },
 
   async GetCodexStatus() { return getCodexStatus(); },
+  async GetCodexAppPath() { return { appPath: getCodexAppPath(), error: '' }; },
+  async PickCodexApp() {
+    const pick = await app.showOpenDialog({
+      parentWindow: win,
+      title: 'Choose ChatGPT',
+      message: 'Select the ChatGPT app on your Mac.',
+      buttonLabelOpen: 'Use this app',
+      defaultPath: getCodexAppPath() || '/Applications',
+      selectionPolicy: 'files',
+      filters: [{ name: 'Applications', extensions: ['app'] }],
+      features: { canCreateDirectories: false, treatPackageAsDirectories: false },
+    });
+    return { appPath: pick.paths[0] || '', canceled: pick.canceled || pick.paths.length === 0 };
+  },
+  async SetCodexAppPath(request) {
+    return setCodexAppPath(request.appPath, () => [...generations.values()].some((controller) => !controller.signal.aborted));
+  },
   async StartCodexLogin() { return startCodexLogin((url) => workspace.openUrl(url)); },
   async CancelCodexLogin() { await cancelCodexLogin(); return {}; },
 

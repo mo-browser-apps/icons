@@ -7,7 +7,7 @@ import ts from "typescript";
 const require = createRequire(import.meta.url);
 
 // Run actual main-process modules with isolated preferences and HTTP.
-export function mainLoader({ prefs, fetch, env = {}, timers = {} }) {
+export function mainLoader({ prefs = { getString: () => "" }, fetch, env = {}, timers = {}, platform = process.platform, modules = {} }) {
   const cache = new Map();
   return function load(file) {
     if (cache.has(file)) return cache.get(file).exports;
@@ -16,10 +16,11 @@ export function mainLoader({ prefs, fetch, env = {}, timers = {} }) {
     const source = ts.transpileModule(readFileSync(file, "utf8"), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     }).outputText;
-    const localRequire = (id) => id === "@mobrowser/api" ? { prefs }
+    const localRequire = (id) => Object.hasOwn(modules, id) ? modules[id]
+      : id === "@mobrowser/api" ? { prefs }
       : id.startsWith(".") ? load(path.resolve(path.dirname(file), id + ".ts")) : require(id);
     vm.runInNewContext(`(function(require, module, exports) {${source}\n})`, {
-      Buffer, URL, Error, process: { env }, console, fetch, AbortSignal, AbortController, FormData, Blob,
+      Buffer, URL, Error, process: { env, platform }, console, fetch, AbortSignal, AbortController, FormData, Blob,
       setTimeout: timers.setTimeout ?? ((callback, delay) => setTimeout(callback, delay <= 2000 ? 0 : delay)),
       clearTimeout: timers.clearTimeout ?? clearTimeout,
     })(localRequire, module, module.exports);

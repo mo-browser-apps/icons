@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, Settings2, Sparkles, Trash2, X } from "lucide-react"
+import { ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink, Eye, EyeOff, FolderOpen, KeyRound, RefreshCw, Settings2, Sparkles, Trash2, X } from "lucide-react"
 import { ipc } from "@/gen/ipc"
 import type { CodexStatus, GetGenerationSettingsResponse, ImageModelOption } from "@/gen/app"
 
@@ -32,6 +32,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const [step, setStep] = useState<Step>("connection")
   const [codex, setCodex] = useState<CodexStatus | null>(null)
   const [checkingCodex, setCheckingCodex] = useState(false)
+  const [savedAppPath, setSavedAppPath] = useState("")
   const [isSetupFlow, setIsSetupFlow] = useState(false)
   const [keyBackStep, setKeyBackStep] = useState<"connection" | "models">("connection")
   const [modelsBackStep, setModelsBackStep] = useState<"connection" | "key">("key")
@@ -42,6 +43,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const [error, setError] = useState("")
   const codexSelected = settings?.provider === "codex"
   const codexConnected = codexSelected && settings.ready && codex?.state === "ready" && settings.codex?.email === codex.email
+  const codexMissing = codex?.state === "not_installed"
   const requestVersion = useRef(0)
   const dialog = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -134,9 +136,13 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     if (!quiet) setCheckingCodex(true)
     setError("")
     try {
-      const response = await ipc.app.GetCodexStatus({})
+      const [response, location] = await Promise.all([
+        ipc.app.GetCodexStatus({}),
+        ipc.app.GetCodexAppPath({}).catch(() => null),
+      ])
       if (version !== requestVersion.current) return
       setCodex(response)
+      if (location) setSavedAppPath(location.appPath)
       setError(response.state === "update_required" ? "" : response.error)
       return response
     } catch {
@@ -152,6 +158,27 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     void checkCodex()
     return () => { requestVersion.current++; void ipc.app.CancelCodexLogin({}).catch(() => {}) }
   }, [open, step, checkCodex])
+  const chooseAppLocation = async (automatic = false) => {
+    if (saving || checkingCodex || codex?.state === "waiting") return
+    const version = ++requestVersion.current
+    setSaving(true)
+    setError("")
+    try {
+      let appPath = ""
+      if (!automatic) {
+        const pick = await ipc.app.PickCodexApp({})
+        if (version !== requestVersion.current || pick.canceled) return
+        appPath = pick.appPath
+      }
+      const response = await ipc.app.SetCodexAppPath({ appPath })
+      if (version !== requestVersion.current) return
+      if (response.error) { setError(response.error); return }
+      setSavedAppPath(response.appPath)
+      await checkCodex()
+    } catch {
+      if (version === requestVersion.current) setError("Could not save the app location. Try again.")
+    } finally { setSaving(false) }
+  }
   useEffect(() => {
     if (!open || step !== "codex") return
     const onFocus = () => {
@@ -182,13 +209,13 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   }
   const codexAction = async () => {
     if (saving || checkingCodex || !codex) return
-    if (codexConnected) { close(); return }
+    if (codexConnected || codexMissing) { close(); return }
     if (codex.state === "waiting") return
     if (codex.state === "error") { await checkCodex(); return }
     setSaving(true)
     setError("")
     try {
-      if (codex.state === "not_installed" || codex.state === "update_required") {
+      if (codex.state === "update_required") {
         await ipc.app.OpenExternalUrl({ url: "https://learn.chatgpt.com/docs/app" })
       } else if (codex.state === "ready") {
         const response = await ipc.app.SetGenerationConnection({ connection: "codex" })
@@ -217,21 +244,21 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const codexTitle = checkingCodex ? "Checking ChatGPT…"
     : codex?.state === "ready" ? codexConnected ? "Connected to MōIcons" : "ChatGPT account found"
     : codex?.state === "waiting" ? "Finish signing in"
-    : codex?.state === "not_installed" ? "Install ChatGPT to continue"
+    : codex?.state === "not_installed" ? "ChatGPT could not be found"
     : codex?.state === "update_required" ? "Update ChatGPT to continue"
     : codex?.state === "error" ? "Could not connect to ChatGPT"
     : "Sign in to ChatGPT"
   const codexDescription = checkingCodex ? "Looking for the ChatGPT desktop app and your saved sign-in."
     : codex?.state === "ready" ? codex.email || "Your ChatGPT account"
     : codex?.state === "waiting" ? "Complete sign-in in your browser. This screen will update automatically."
-    : codex?.state === "not_installed" ? "Install the ChatGPT desktop app. We’ll check again when you return here."
+    : codex?.state === "not_installed" ? "Choose the ChatGPT app on your Mac, or check again."
     : codex?.state === "update_required" ? "Get the latest ChatGPT desktop app. We’ll check again when you return."
     : codex?.state === "error" ? "Check that the ChatGPT desktop app opens on this Mac, then try again."
     : "Continue in your browser to sign in with your ChatGPT account."
   const codexActionLabel = checkingCodex || !codex ? "Checking…"
     : codexConnected ? "Done"
     : codex.state === "ready" ? "Use this account"
-    : codex.state === "not_installed" ? "Install ChatGPT"
+    : codex.state === "not_installed" ? "Done"
     : codex.state === "update_required" ? "Update ChatGPT"
     : codex.state === "error" ? "Try again"
     : codex.state === "waiting" ? "Waiting for sign-in…" : "Sign in with ChatGPT"
@@ -403,8 +430,8 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
               </button>
             </div> : step === "codex" ? <div className="space-y-4">
               <div className="rounded-xl border border-border bg-secondary/40 p-4">
-                <div className="flex items-center gap-3">
-                  <div role="status" aria-live="polite" className="flex min-w-0 flex-1 items-start gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div role="status" aria-live="polite" className="flex min-w-[180px] flex-1 items-start gap-3">
                     <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${codexConnected ? "bg-emerald-500/10 text-emerald-400" : "bg-secondary text-muted-foreground"}`}>
                       {checkingCodex || codex?.state === "waiting" ? <RefreshCw className="h-4 w-4 animate-spin" /> : codexConnected ? <Check className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
                     </span>
@@ -412,15 +439,25 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                       <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{codexDescription}</p>
                     </div>
                   </div>
-                  {codexSelected && <button type="button" disabled={saving || checkingCodex} onClick={() => void disconnectCodex()} aria-label="Disconnect from MōIcons" aria-describedby="codex-disconnect-description" className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Disconnect</button>}
+                  {codexMissing ? <div className="ml-auto flex shrink-0 flex-col gap-2">
+                    <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="h-9 rounded-lg bg-primary px-4 text-xs font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Browse…</button>
+                    <button type="button" disabled={saving || checkingCodex} onClick={() => void checkCodex()} className="h-8 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Check again</button>
+                  </div> : codexSelected && <button type="button" disabled={saving || checkingCodex} onClick={() => void disconnectCodex()} aria-label="Disconnect from MōIcons" aria-describedby="codex-disconnect-description" className="h-8 shrink-0 rounded-lg border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Disconnect</button>}
                 </div>
-                {codexSelected && <p id="codex-disconnect-description" className="mt-3 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>}
+                {codexSelected && !codexMissing && <p id="codex-disconnect-description" className="mt-3 text-xs text-muted-foreground">Your account stays signed in to ChatGPT.</p>}
+                {!!savedAppPath && <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+                  <FolderOpen aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span title={savedAppPath} aria-label={`Selected app: ${savedAppPath}`} className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{savedAppPath}</span>
+                  {!codexMissing && <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void chooseAppLocation()} className="h-7 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">Change…</button>}
+                  <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void chooseAppLocation(true)} aria-label="Use automatic detection" title="Use automatic detection" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><X aria-hidden="true" className="h-3.5 w-3.5" /></button>
+                </div>}
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">Generation uses your plan’s allowance and available credits. Usage starts when you press Generate.</p>
-              {!codexConnected && <div className="flex items-center gap-4 text-xs">
+              {!codexConnected && !codexMissing && <div className="flex items-center gap-4 text-xs">
                 <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
+              {!codexMissing && !savedAppPath && codex?.state !== "waiting" && <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-xs font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><FolderOpen aria-hidden="true" className="h-3.5 w-3.5" />Browse…</button>}
             </div> : step === "remove" ? null : step === "key" ? <div>
               <label htmlFor="generation-api-key" className="sr-only">API key</label>
               <div className="relative">

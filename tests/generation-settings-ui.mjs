@@ -125,6 +125,39 @@ try {
     state.container.style.padding = "80px 24px";
     state.root = createRoot(state.container);
     state.root.render(React.createElement(GenerationSettings, { disabled: false, connectionRequest: 0, onReadyChange: () => {} }));
+    state.mountCodex = () => {
+      state.savedPath = "";
+      state.pathWrites = [];
+      state.statusReads = 0;
+      state.connectionWrites = 0;
+      state.settings = { ...state.settings, provider: "codex", ready: false, codex: { state: "not_installed", email: "", error: "" } };
+      ipc.app.CancelCodexLogin = async () => ({});
+      ipc.app.GetCodexStatus = async () => {
+        state.statusReads++;
+        return { state: state.savedPath ? "ready" : "not_installed", email: state.savedPath ? "test@example.com" : "", error: "" };
+      };
+      ipc.app.SetGenerationConnection = async ({ connection }) => {
+        state.connectionWrites++;
+        state.settings = { ...state.settings, ready: connection === "codex", codex: { state: "ready", email: "test@example.com", error: "" } };
+        return state.settings;
+      };
+      state.pickMode = "cancel";
+      state.externalUrls = [];
+      ipc.app.OpenExternalUrl = async ({ url }) => { state.externalUrls.push(url); return {}; };
+      ipc.app.GetCodexAppPath = async () => ({ appPath: state.savedPath, error: "" });
+      ipc.app.PickCodexApp = async () => {
+        if (state.pickMode === "delay") await new Promise((resolve) => { state.resolvePick = resolve; });
+        return { appPath: state.pickedPath || "", canceled: state.pickMode === "cancel" };
+      };
+      ipc.app.SetCodexAppPath = async ({ appPath }) => {
+        state.pathWrites.push(appPath);
+        if (state.pathMode === "delay-save") await new Promise((resolve) => { state.resolvePathSave = resolve; });
+        if (state.pathMode === "invalid") return { appPath: state.savedPath, error: "That app could not be found or accessed. Check its location in Finder and try again." };
+        state.savedPath = appPath;
+        return { appPath, error: "" };
+      };
+      state.root.render(React.createElement(GenerationSettings, { key: "codex", disabled: false, connectionRequest: 0, onReadyChange: () => {} }));
+    };
   });
   await wait(() => !!document.querySelector('#settings-test button:not(:disabled)'));
   await openKey();
@@ -209,6 +242,81 @@ try {
   assert.equal(await evaluate(() => window.__settingsTest.reads), reads);
   assert.equal(await evaluate(() => !!document.querySelector('dialog[open] [aria-label="Remove API key"]')), false);
   check("deletion handles errors, requires confirmation, and returns to empty-key setup");
+  await click("Close generation settings");
+
+  await evaluate(() => window.__settingsTest.mountCodex());
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));
+  assert.equal(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].filter((button) => button.textContent.trim() === "Check again").length), 1);
+  assert.equal(await evaluate(() => !!document.querySelector('dialog[open] [aria-label="Disconnect from MōIcons"], dialog[open] #codex-disconnect-description')), false);
+  assert.equal(await evaluate(() => document.querySelector("dialog[open]").textContent.includes("Install ChatGPT")), false);
+  assert.equal(await evaluate(() => document.querySelector("dialog[open]").textContent.includes("Set app location")), false);
+  const statusReads = await evaluate(() => window.__settingsTest.statusReads);
+  await click("Check again");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));
+  assert.equal(await evaluate(() => window.__settingsTest.statusReads), statusReads + 1);
+  assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), 0);
+  check("missing-app card offers Browse and retries detection without disconnecting");
+  await screenshot("chatgpt-not-found");
+
+  await evaluate(() => { window.__settingsTest.pickMode = "delay"; });
+  await click("Browse…");
+  assert.ok(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].every((button) => button.disabled)));
+  await evaluate(() => { window.__settingsTest.pickMode = "cancel"; window.__settingsTest.resolvePick(); });
+  await wait(() => !!document.querySelector("dialog[open] button[type=submit]:not(:disabled)"));
+  assert.equal(await evaluate(() => window.__settingsTest.pathWrites.length), 0);
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "ChatGPT");
+  check("canceling the native picker leaves settings unchanged and stays on the same screen");
+
+  await evaluate(() => { const state = window.__settingsTest; state.pickMode = "success"; state.pickedPath = "/missing/ChatGPT.app"; state.pathMode = "invalid"; });
+  await click("Browse…");
+  await wait(() => !!document.querySelector("dialog[open] [role=alert]"));
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), "");
+  check("invalid selected apps show an inline error without saving");
+
+  const customPath = "/Applications/ChatGPT.app";
+  await evaluate((appPath) => { const state = window.__settingsTest; state.pickedPath = appPath; state.pathMode = "delay-save"; }, customPath);
+  await click("Browse…");
+  assert.ok(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].every((button) => button.disabled)));
+  await evaluate(() => { window.__settingsTest.pathMode = "success"; window.__settingsTest.resolvePathSave(); });
+  await wait(() => document.querySelector("dialog[open]")?.textContent.includes("test@example.com"));
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), customPath);
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "ChatGPT");
+  await click("Use this account");
+  await wait(() => !document.querySelector("dialog[open]"));
+  await click("Generation settings");
+  await wait(() => document.querySelector("dialog[open]")?.textContent.includes("Connected to MōIcons"));
+  assert.equal(await evaluate(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent), customPath);
+  await screenshot("chatgpt-app-selected");
+  check("selected app is validated, connects, and remains visible after reopening settings");
+
+  await evaluate(() => { const state = window.__settingsTest; state.pathMode = "invalid"; state.pickedPath = "/Applications/Other.app"; });
+  await click("Change…");
+  await wait(() => !!document.querySelector("dialog[open] [role=alert]"));
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), customPath);
+  assert.equal(await evaluate(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent), customPath);
+  check("an invalid replacement keeps the previously selected app");
+
+  const replacementPath = "/Users/test/Applications/ChatGPT Personal.app";
+  await evaluate((appPath) => { const state = window.__settingsTest; state.pathMode = "success"; state.pickedPath = appPath; }, replacementPath);
+  await click("Change…");
+  await wait(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent === window.__settingsTest.savedPath);
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), replacementPath);
+  check("Change opens the picker and replaces the saved app");
+
+  await click("Use automatic detection");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));
+  assert.equal(await evaluate(() => window.__settingsTest.savedPath), "");
+  assert.equal(await evaluate(() => !!document.querySelector('[aria-label^="Selected app:"]')), false);
+  assert.deepEqual(await evaluate(() => window.__settingsTest.pathWrites), ["/missing/ChatGPT.app", customPath, "/Applications/Other.app", replacementPath, ""]);
+  check("clearing the selected app restores automatic detection");
+
+  const connectionWrites = await evaluate(() => window.__settingsTest.connectionWrites);
+  await click("Done");
+  await wait(() => !document.querySelector("dialog[open]"));
+  assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), connectionWrites);
+  assert.deepEqual(await evaluate(() => window.__settingsTest.externalUrls), []);
+  check("Done closes a missing-app state without installing or changing the connection");
+
 } finally {
   await evaluate(() => {
     const state = window.__settingsTest;
