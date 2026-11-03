@@ -35,7 +35,8 @@ import { saveImageSettings } from './lib/generation-settings';
 import { removeStoredApiKey, saveValidatedApiKey } from './lib/api-key-settings';
 import { readGenerationSettings } from './lib/read-generation-settings';
 import { setGenerationConnection } from './lib/set-generation-connection';
-import { getCodexStatus, startCodexLogin, cancelCodexLogin } from './lib/codex-account';
+import { getCodexStatus, startCodexLogin, cancelCodexLogin, setCodexAppPath } from './lib/codex-account';
+import { getCodexAppPath } from './lib/codex-location';
 import { closeCodexSessions } from './lib/codex-client';
 import {
   getResolvedApiKey,
@@ -498,6 +499,10 @@ ipc.registerService(AppServiceDescriptor, {
   },
 
   async GetCodexStatus() { return getCodexStatus(); },
+  async GetCodexAppPath() { return { appPath: getCodexAppPath(), error: '' }; },
+  async SetCodexAppPath(request) {
+    return setCodexAppPath(request.appPath, () => [...generations.values()].some((controller) => !controller.signal.aborted));
+  },
   async StartCodexLogin() { return startCodexLogin((url) => workspace.openUrl(url)); },
   async CancelCodexLogin() { await cancelCodexLogin(); return {}; },
 

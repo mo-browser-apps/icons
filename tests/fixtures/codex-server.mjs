@@ -27,6 +27,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   const reply = (result) => send({ id, result });
   if (method === "initialize") {
+    if (scenario === "start-crash") process.exit(1);
+    if (scenario === "start-hang") return;
+    if (scenario === "start-malformed") { process.stdout.write("not-json\n"); return; }
     if (scenario === "old") send({ id, error: { code: -32601, message: "private server detail" } });
     else reply({});
   }

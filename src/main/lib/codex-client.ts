@@ -1,8 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { access, mkdtemp, rm } from "node:fs/promises";
-import { constants } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { fallbackBinPaths, findCodexCandidates } from "./codex-discovery";
+
+export { findCodex } from "./codex-discovery";
 
 export interface CodexEvent {
   method: string;
@@ -22,20 +24,8 @@ export class CodexCompatibilityError extends Error {
   constructor() { super("This ChatGPT connection is not compatible with MōIcons. Update the ChatGPT desktop app, then try again."); }
 }
 
-const fallbackBinPaths = ["/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin")];
-
-export async function findCodex(): Promise<string | undefined> {
-  // Finder-launched apps usually have a much smaller PATH than a terminal.
-  const candidates = process.env.MOICONS_CODEX_PATH ? [process.env.MOICONS_CODEX_PATH] : [
-    ...["/Applications", path.join(homedir(), "Applications")].flatMap((root) =>
-      ["ChatGPT.app", "Codex.app"].map((app) => path.join(root, app, "Contents/Resources/codex"))),
-    ...[...(process.env.PATH || "").split(path.delimiter), ...fallbackBinPaths]
-      .filter(Boolean).map((dir) => path.join(dir, "codex")),
-  ];
-  for (const candidate of new Set(candidates)) {
-    if (!path.isAbsolute(candidate)) continue;
-    try { await access(candidate, constants.X_OK); return candidate; } catch { /* Try next installation. */ }
-  }
+export class CodexNotInstalledError extends Error {
+  constructor() { super("Install the ChatGPT desktop app on this Mac, or set its app location, then check again."); }
 }
 
 /** A private stdio session. No shell, copied credentials, or global config writes. */
@@ -49,7 +39,6 @@ export class CodexClient {
   private child: ChildProcessWithoutNullStreams;
   private disposing?: Promise<void>;
   private constructor(readonly cwd: string, executable: string) {
-    sessions.add(this);
     const env = { ...process.env };
     // npm CLI launchers use /usr/bin/env node, including when launched from Finder.
     env.PATH = [...new Set([path.dirname(executable), ...(env.PATH || "").split(path.delimiter),
@@ -65,6 +54,7 @@ export class CodexClient {
     this.child = spawn(executable, ["app-server", "--listen", "stdio://",
       ...Object.entries(overrides).flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]),
     ], { cwd, env, stdio: "pipe" });
+    sessions.add(this);
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk: string) => this.receive(chunk));
     // Server logs can contain private prompts or account data. Drain without logging.
@@ -74,19 +64,29 @@ export class CodexClient {
     this.child.on("exit", () => this.fail(new Error("The ChatGPT connection stopped unexpectedly. Update the ChatGPT desktop app and try again.")));
   }
 
-  static async start(): Promise<CodexClient> {
-    const executable = await findCodex();
-    if (!executable) throw new Error("Install the ChatGPT desktop app on this Mac, then check again.");
-    const cwd = await mkdtemp(path.join(tmpdir(), "moicons-codex-"));
-    const client = new CodexClient(cwd, executable);
-    try {
-      await client.request("initialize", {
-        clientInfo: { name: "moicons", title: "MōIcons", version: "1.0.0" },
-        capabilities: { experimentalApi: true },
-      });
-      client.send({ method: "initialized", params: {} });
-      return client;
-    } catch (error) { await client.dispose(); throw error; }
+  static async start(executable?: string): Promise<CodexClient> {
+    const candidates = executable ? [executable] : await findCodexCandidates();
+    if (!candidates.length) throw new CodexNotInstalledError();
+    let lastError: unknown;
+    for (const candidate of candidates) {
+      const cwd = await mkdtemp(path.join(tmpdir(), "moicons-codex-"));
+      let client: CodexClient | undefined;
+      try {
+        client = new CodexClient(cwd, candidate);
+        await client.request("initialize", {
+          clientInfo: { name: "moicons", title: "MōIcons", version: "1.0.0" },
+          capabilities: { experimentalApi: true },
+        }, 10_000);
+        client.send({ method: "initialized", params: {} });
+        return client;
+      } catch (error) {
+        lastError = error;
+        if (client) await client.dispose();
+        else await rm(cwd, { recursive: true, force: true });
+      }
+    }
+    // Retry only startup, before any sign-in or generation request is sent.
+    throw lastError;
   }
 
   request<T>(method: string, params: unknown, timeout = 30_000): Promise<T> {

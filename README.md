@@ -6,6 +6,8 @@ Choose **ChatGPT** or an **API key** in the setup wizard. You can change the con
 
 For ChatGPT, check the account shown, then select **Use this account**. MōIcons finds your existing sign-in, or offers browser sign-in with ChatGPT. Install the current [ChatGPT desktop app](https://learn.chatgpt.com/docs/app) to connect. If the app is missing or needs updating, the wizard offers instructions and checks again when you return. Codex CLI installations are also supported.
 
+If ChatGPT is installed but cannot be found, select **Already installed? Set app location** and paste the full path to its `.app` bundle. MōIcons checks the connection before saving. This location takes priority over all automatic detection and environment overrides until you change it or select **Use automatic detection** under **App location**.
+
 Connecting does not generate images. Usage starts when you press **Generate** and uses your Codex allowance and available credits; account limits apply. ChatGPT manages image model and quality. In generation settings, **Change method** lets you choose an API key; **Disconnect from MōIcons** pauses generation until you choose a method again, keeping any saved API key. Neither action signs you out of ChatGPT.
 
 The API option supports the [OpenAI API](https://openai.com/api/) and [OpenRouter](https://openrouter.ai/). Defaults favor fast iteration: GPT Image 2.5 Flare at low quality for OpenAI, and Nano Banana 2 Lite for OpenRouter. Open generation settings to load available image models and choose quality. Choices are saved separately for each provider. OpenAI offers Low, Medium, High, and Auto; OpenRouter controls follow the selected model's capabilities. `OPENROUTER_MODEL` sets the initial OpenRouter model until you save a selection in the app.
@@ -55,12 +57,12 @@ npm run dev:mock
 
 The ChatGPT connection uses Codex App Server internally: a private `codex app-server` process with ChatGPT authentication. It does not copy authentication tokens or change the user's Codex configuration. It disables shell, app, plugin, MCP, and subagent tools for image sessions, uses a temporary reference directory, and closes the process after the operation. Stop interrupts the active Codex turn and prevents further variants; generation already processed by the service may still count toward usage. Failed image requests are not automatically repeated.
 
-MōIcons detects the Codex executable bundled with the ChatGPT desktop app, older Codex apps, and common CLI installations. For a custom installation, launch with `MOICONS_CODEX_PATH` set to the absolute executable path. A Codex version with the built-in image generation tool and app-server `imageGeneration` events is required. This integration was verified with `codex-cli 0.155.0-alpha.16.4`; older installations may need updating.
+MōIcons discovers ChatGPT and older Codex apps by their macOS bundle identifier, checking running apps before registered installations. This supports renamed apps and custom installation folders. It also checks `ChatGPT.app` and `Codex.app` in `/Applications` and `~/Applications`, then `PATH` and common CLI locations. Automatic detection tries the next candidate if a process cannot start or complete its initial handshake. Account operations and image requests are not retried against another installation. A saved **App location** takes highest priority, followed by `MOICONS_CODEX_PATH` (an absolute executable path), then automatic detection. An unusable explicit override produces an error instead of silently choosing another installation. A Codex version with the built-in image generation tool and app-server `imageGeneration` events is required. This integration was verified with `codex-cli 0.155.0-alpha.16.4`; older installations may need updating.
 
 Run provider and connection tests without API calls:
 
 ```bash
-node --test tests/api-key-settings.mjs tests/image-models.mjs tests/openrouter.mjs tests/codex.mjs tests/image-requests.mjs
+node --test tests/api-key-settings.mjs tests/image-models.mjs tests/openrouter.mjs tests/codex.mjs tests/codex-discovery.mjs tests/codex-location.mjs tests/codex-startup.mjs tests/image-requests.mjs
 ```
 
 For attachment, cancellation and refinement regressions, start
