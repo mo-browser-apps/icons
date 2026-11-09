@@ -6,8 +6,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const APP_PATH_PREF = "imageGeneration.chatgptAppPath";
-export const codexExecutablePath = (appPath: string) => path.join(appPath, "Contents/Resources/codex");
+export const codexExecutablePaths = (appPath: string) => [
+  // Recent ChatGPT builds ship the CLI as a package with its own launcher.
+  path.join(appPath, "Contents/Resources/codex-cli/bin/codex"),
+  path.join(appPath, "Contents/Resources/codex"),
+];
 export const getCodexAppPath = () => prefs.getString(APP_PATH_PREF);
+
+export async function executableFile(candidate: string): Promise<boolean> {
+  if (!path.isAbsolute(candidate)) return false;
+  try {
+    // X_OK also succeeds for searchable directories; only launch regular files.
+    if (!(await stat(candidate)).isFile()) return false;
+    await access(candidate, constants.X_OK);
+    return true;
+  } catch { return false; }
+}
 
 export async function validateCodexAppPath(input: string): Promise<string> {
   let value = input.trim();
@@ -23,12 +37,10 @@ export async function validateCodexAppPath(input: string): Promise<string> {
   try {
     if (!(await stat(appPath)).isDirectory()) throw new Error();
   } catch { throw new Error("That app could not be found or accessed. Check its location in Finder and try again."); }
-  try {
-    const executable = codexExecutablePath(appPath);
-    if (!(await stat(executable)).isFile()) throw new Error();
-    await access(executable, constants.X_OK);
-  } catch { throw new Error("This app does not contain a usable ChatGPT connection. Choose a current ChatGPT desktop app."); }
-  return appPath;
+  for (const executable of codexExecutablePaths(appPath)) {
+    if (await executableFile(executable)) return appPath;
+  }
+  throw new Error("This app does not contain a usable ChatGPT connection. Choose a current ChatGPT desktop app.");
 }
 
 export function persistCodexAppPath(appPath: string): void {
