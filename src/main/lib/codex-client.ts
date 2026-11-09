@@ -64,8 +64,8 @@ export class CodexClient {
     this.child.on("exit", () => this.fail(new Error("The ChatGPT connection stopped unexpectedly. Update the ChatGPT desktop app and try again.")));
   }
 
-  static async start(executable?: string): Promise<CodexClient> {
-    const candidates = executable ? [executable] : await findCodexCandidates();
+  static async start(executable?: string | string[]): Promise<CodexClient> {
+    const candidates = typeof executable === "string" ? [executable] : executable ?? await findCodexCandidates();
     if (!candidates.length) throw new CodexNotInstalledError();
     let lastError: unknown;
     for (const candidate of candidates) {

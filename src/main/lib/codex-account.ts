@@ -1,5 +1,6 @@
 import { CodexClient, CodexCompatibilityError, CodexNotInstalledError } from "./codex-client";
-import { codexExecutablePath, getCodexAppPath, persistCodexAppPath, validateCodexAppPath } from "./codex-location";
+import { findCodexCandidates } from "./codex-discovery";
+import { getCodexAppPath, persistCodexAppPath, validateCodexAppPath } from "./codex-location";
 
 export interface CodexStatus {
   state: "not_installed" | "update_required" | "signed_out" | "waiting" | "ready" | "error";
@@ -35,7 +36,7 @@ export async function setCodexAppPath(input: string, isGenerating: () => boolean
     await cancelCodexLogin();
     const appPath = input.trim() ? await validateCodexAppPath(input) : "";
     if (appPath) {
-      client = await CodexClient.start(codexExecutablePath(appPath));
+      client = await CodexClient.start(await findCodexCandidates(appPath));
       // Validate compatibility without signing in or generating an image.
       await client.request<CodexAccount>("account/read", { refreshToken: false });
       await client.dispose();

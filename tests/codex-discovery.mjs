@@ -10,6 +10,7 @@ import vm from "node:vm";
 import { mainLoader } from "./helpers/load-main.mjs";
 
 const bundled = (app) => path.join(app, "Contents/Resources/codex");
+const packaged = (app) => path.join(app, "Contents/Resources/codex-cli/bin/codex");
 const standard = bundled("/Applications/ChatGPT.app");
 const home = "/Users/discovery-test";
 
@@ -77,6 +78,33 @@ test("discovers a registered app without requiring it to run", async () => {
   assert.equal(await f.findCodex(), bundled(app));
 });
 
+test("discovers the packaged CLI in running, registered, and standard app locations", async () => {
+  for (const location of ["running", "registered", "standard"]) {
+    const app = location === "standard" ? "/Applications/ChatGPT.app" : "/Volumes/AI apps/ChatGPT 'personal' ✨.app";
+    const f = subject({ [location]: [app], files: { [packaged(app)]: "file" } });
+    assert.equal(await f.findCodex(), packaged(app), location);
+  }
+});
+
+test("tries both layouts of the preferred app before other installations", async () => {
+  const app = "/Volumes/AI apps/ChatGPT.app";
+  const f = subject({ running: [app], registered: [app, "/Applications/ChatGPT.app"], files: {
+    [packaged(app)]: "file", [bundled(app)]: "file", [standard]: "file",
+  } });
+  assert.deepEqual([...await f.findCodexCandidates()], [packaged(app), bundled(app), standard]);
+  assert.equal(f.probes.filter((candidate) => candidate === packaged(app)).length, 1);
+});
+
+test("an explicitly selected app restricts both candidates to that bundle", async () => {
+  const app = "/manual/ChatGPT.app";
+  const f = subject({ registered: ["/Applications/ChatGPT.app"], env: { MOICONS_CODEX_PATH: "/custom/codex" }, files: {
+    [packaged(app)]: "file", [bundled(app)]: "file", [standard]: "file", "/custom/codex": "file",
+  } });
+  assert.deepEqual([...await f.findCodexCandidates(app)], [packaged(app), bundled(app)]);
+  assert.deepEqual([...await f.findCodexCandidates("/missing/ChatGPT.app")], []);
+  assert.equal(f.calls.length, 0);
+});
+
 test("skips stale, inaccessible, and directory candidates to find another registered installation", async () => {
   const apps = ["/stale/ChatGPT.app", "/denied/ChatGPT.app", "/directory/ChatGPT.app", "/working/ChatGPT.app"];
   const f = subject({ running: [null, apps[0]], registered: apps, files: {
@@ -89,9 +117,11 @@ test("skips stale, inaccessible, and directory candidates to find another regist
 test("retains all four standard application locations when discovery finds no usable app", async () => {
   for (const root of ["/Applications", path.join(home, "Applications")]) {
     for (const name of ["ChatGPT.app", "Codex.app"]) {
-      const candidate = bundled(path.join(root, name));
-      const f = subject({ registered: ["/stale/ChatGPT.app"], files: { [candidate]: "file" } });
-      assert.equal(await f.findCodex(), candidate);
+      for (const layout of [bundled, packaged]) {
+        const candidate = layout(path.join(root, name));
+        const f = subject({ registered: ["/stale/ChatGPT.app"], files: { [candidate]: "file" } });
+        assert.equal(await f.findCodex(), candidate);
+      }
     }
   }
 });

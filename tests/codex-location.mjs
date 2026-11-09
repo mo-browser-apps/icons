@@ -7,11 +7,11 @@ import { pathToFileURL } from "node:url";
 import { mainLoader } from "./helpers/load-main.mjs";
 
 const key = "imageGeneration.chatgptAppPath";
-async function subject(t, { initial = "", persist = true, startError, accountError, account = null } = {}) {
+async function subject(t, { initial = "", persist = true, startError, accountError, account = null, layout = "legacy" } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "moicons-location-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const app = path.join(root, "ChatGPT 'personal' ✨.app");
-  const executable = path.join(app, "Contents/Resources/codex");
+  const executable = path.join(app, layout === "packaged" ? "Contents/Resources/codex-cli/bin/codex" : "Contents/Resources/codex");
   await mkdir(path.dirname(executable), { recursive: true });
   await writeFile(executable, "fixture", { mode: 0o700 });
   const values = new Map(initial ? [[key, initial]] : []);
@@ -43,18 +43,55 @@ async function subject(t, { initial = "", persist = true, startError, accountErr
   };
 }
 
-test("validates, saves, and reuses a manual bundle path ahead of the environment override", async (t) => {
-  const f = await subject(t);
+for (const layout of ["legacy", "packaged"]) test(`validates, saves, and reuses a ${layout} bundle ahead of the environment override`, async (t) => {
+  const f = await subject(t, { layout });
   assert.equal((await f.setCodexAppPath(` '${f.app}/' `)).error, "");
   assert.equal(f.getCodexAppPath(), f.app);
   assert.equal(f.writes(), 1);
-  assert.equal(f.calls[0][1], f.executable);
+  assert.deepEqual([...f.calls[0][1]], [f.executable]);
   assert.deepEqual(f.calls.map(([method]) => method), ["start", "account/read", "dispose"]);
   assert.equal(f.calls[1][1].refreshToken, false);
   const discovery = f.load(path.resolve("src/main/lib/codex-discovery.ts"));
   assert.equal(await discovery.findCodex(), f.executable);
   const reopened = mainLoader({ prefs: f.prefs })(path.resolve("src/main/lib/codex-location.ts"));
   assert.equal(reopened.getCodexAppPath(), f.app);
+});
+
+test("a saved app remains selected when an update moves its CLI into the new package", async (t) => {
+  const f = await subject(t);
+  await f.setCodexAppPath(f.app);
+  await rm(f.executable);
+  const packaged = path.join(f.app, "Contents/Resources/codex-cli/bin/codex");
+  await mkdir(path.dirname(packaged), { recursive: true });
+  await writeFile(packaged, "fixture", { mode: 0o700 });
+  const discovery = f.load(path.resolve("src/main/lib/codex-discovery.ts"));
+  assert.equal(await discovery.findCodex(), packaged);
+  assert.equal(f.getCodexAppPath(), f.app);
+  assert.equal(f.writes(), 1);
+});
+
+test("manual validation skips an unusable packaged launcher and retains the legacy fallback", async (t) => {
+  const f = await subject(t);
+  const packaged = path.join(f.app, "Contents/Resources/codex-cli/bin/codex");
+  await mkdir(path.dirname(packaged), { recursive: true });
+  await writeFile(packaged, "fixture", { mode: 0o600 });
+  assert.equal((await f.setCodexAppPath(f.app)).error, "");
+  assert.deepEqual([...f.calls[0][1]], [f.executable]);
+  await chmod(packaged, 0o700);
+  assert.equal((await f.setCodexAppPath(f.app)).error, "");
+  assert.deepEqual([...f.calls.filter(([method]) => method === "start").at(-1)[1]], [packaged, f.executable]);
+});
+
+test("an invalid packaged launcher is rejected without changing the saved app", async (t) => {
+  const f = await subject(t, { layout: "packaged", initial: "/previous/ChatGPT.app" });
+  await chmod(f.executable, 0o600);
+  assert.match((await f.setCodexAppPath(f.app)).error, /usable ChatGPT connection/);
+  await rm(f.executable);
+  await mkdir(f.executable);
+  assert.match((await f.setCodexAppPath(f.app)).error, /usable ChatGPT connection/);
+  assert.equal(f.getCodexAppPath(), "/previous/ChatGPT.app");
+  assert.equal(f.writes(), 0);
+  assert.equal(f.calls.length, 0);
 });
 
 test("accepts Finder paths, file URLs, and home-relative paths without invoking a shell", async (t) => {

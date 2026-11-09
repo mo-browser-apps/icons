@@ -1,9 +1,7 @@
 import { execFile } from "node:child_process";
-import { constants } from "node:fs";
-import { access, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { codexExecutablePath, getCodexAppPath } from "./codex-location";
+import { codexExecutablePaths, executableFile, getCodexAppPath } from "./codex-location";
 
 export const fallbackBinPaths = ["/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin")];
 
@@ -45,28 +43,17 @@ async function discoverAppBundles(): Promise<string[]> {
   }
 }
 
-async function executableFile(candidate: string): Promise<boolean> {
-  if (!path.isAbsolute(candidate)) return false;
-  try {
-    // X_OK also succeeds for searchable directories; only launch regular files.
-    if (!(await stat(candidate)).isFile()) return false;
-    await access(candidate, constants.X_OK);
-    return true;
-  } catch { return false; }
-}
-
-export async function findCodexCandidates(): Promise<string[]> {
+export async function findCodexCandidates(appPath = getCodexAppPath()): Promise<string[]> {
   // A location explicitly chosen in the UI takes priority over every other source.
   // An unavailable override must not silently select a different installation.
-  const appPath = getCodexAppPath();
-  const override = appPath ? codexExecutablePath(appPath) : process.env.MOICONS_CODEX_PATH;
-  if (override) return await executableFile(override) ? [override] : [];
+  const override = appPath ? codexExecutablePaths(appPath)
+    : process.env.MOICONS_CODEX_PATH ? [process.env.MOICONS_CODEX_PATH] : undefined;
 
-  const bundles = await discoverAppBundles();
-  const candidates = [
-    ...bundles.map(codexExecutablePath),
+  const bundles = override ? [] : await discoverAppBundles();
+  const candidates = override ?? [
+    ...bundles.flatMap(codexExecutablePaths),
     ...["/Applications", path.join(homedir(), "Applications")].flatMap((root) =>
-      ["ChatGPT.app", "Codex.app"].map((app) => path.join(root, app, "Contents/Resources/codex"))),
+      ["ChatGPT.app", "Codex.app"].flatMap((app) => codexExecutablePaths(path.join(root, app)))),
     // Finder-launched apps usually have a much smaller PATH than a terminal.
     ...[...(process.env.PATH || "").split(path.delimiter), ...fallbackBinPaths]
       .filter(Boolean).map((dir) => path.join(dir, "codex")),

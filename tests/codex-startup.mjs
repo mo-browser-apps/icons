@@ -51,6 +51,25 @@ test("an explicit executable never falls back to automatic candidates", async (t
   assert.equal((await f.events()).filter((event) => event.cwd).length, 1);
 });
 
+test("a selected app can fall back between its own launchers without automatic discovery", async (t) => {
+  const f = await subject(t, ["start-crash", "success"]);
+  const client = await f.CodexClient.start(f.candidates);
+  assert.equal((await client.request("account/read", { refreshToken: false })).account.type, "chatgpt");
+  assert.equal(f.discoveries(), 0);
+  const sessions = (await f.events()).filter((event) => event.cwd);
+  assert.equal(sessions.length, 2);
+  await assert.rejects(stat(sessions[0].cwd), { code: "ENOENT" });
+  await client.dispose();
+});
+
+test("empty or failing explicit candidates never fall back to another installation", async (t) => {
+  const f = await subject(t, ["old", "success"]);
+  await assert.rejects(f.CodexClient.start([]), f.CodexNotInstalledError);
+  await assert.rejects(f.CodexClient.start([f.candidates[0]]), f.CodexCompatibilityError);
+  assert.equal(f.discoveries(), 0);
+  assert.equal((await f.events()).filter((event) => event.cwd).length, 1);
+});
+
 test("all failing candidates report the final startup error and leave no sessions behind", async (t) => {
   const f = await subject(t, ["start-crash", "old"]);
   await assert.rejects(f.CodexClient.start(), f.CodexCompatibilityError);
