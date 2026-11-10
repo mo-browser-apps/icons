@@ -33,6 +33,7 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
   const connection = load(fileURLToPath(new URL("../src/main/lib/generation-connection.ts", import.meta.url)));
   const provider = load(fileURLToPath(new URL("../src/main/lib/image-provider.ts", import.meta.url)));
   const settings = load(fileURLToPath(new URL("../src/main/lib/read-generation-settings.ts", import.meta.url)));
+  const imageSettings = load(fileURLToPath(new URL("../src/main/lib/generation-settings.ts", import.meta.url)));
   const connectionHandler = load(fileURLToPath(new URL("../src/main/lib/set-generation-connection.ts", import.meta.url)));
   const account = load(fileURLToPath(new URL("../src/main/lib/codex-account.ts", import.meta.url)));
   return {
@@ -42,6 +43,7 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
     provider: provider.resolveProviderName,
     getProvider: provider.getProvider,
     readSettings: settings.readGenerationSettings,
+    saveImageSettings: imageSettings.saveImageSettings,
     setConnection: (connection, running = false) => connectionHandler.setGenerationConnection(connection, running),
     account,
     values, writes: () => writes,
@@ -82,7 +84,7 @@ test("a forced ChatGPT provider can confirm a newly signed-in account without pe
 });
 
 test("other forced providers still reject connection changes", async () => {
-  for (const forced of ["openai", "openrouter", "mock"]) {
+  for (const forced of ["openai", "openrouter", "gemini", "mock"]) {
     const app = subject(async () => { throw new Error("must not call the API"); }, {}, true, { ICON_PROVIDER: forced });
     for (const connection of ["codex", "api", "none"]) await assert.rejects(app.setConnection(connection), /provider is fixed/);
     assert.equal(app.writes(), 0);
@@ -252,4 +254,89 @@ test("empty keys, forced-provider mismatch, malformed replies and empty catalogs
     assert.equal(app.values.get(keyPref), "previous-key");
     assert.equal(app.writes(), 0);
   }
+});
+
+const geminiCatalog = () => Response.json({ models: [
+  { name: "models/gemini-nano-banana-2.1" },
+  { name: "models/gemini-3-pro-image" },
+  { name: "models/gemini-3.8-flash" },
+] });
+
+test("Gemini validates without generation, saves an explicit provider, and preserves its model choice", async () => {
+  const saved = { model: "gemini-3-pro-image", quality: "" };
+  const app = subject(async (url, options) => {
+    assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000");
+    assert.equal(options.method, "GET");
+    assert.equal(options.headers["x-goog-api-key"], "gemini-test-key");
+    assert.equal(options.body, undefined);
+    return geminiCatalog();
+  }, { [keyPref]: "sk-existing", "imageGeneration.gemini": saved });
+  const result = await app.save(" gemini-test-key ", "gemini");
+  assert.equal(result.provider, "gemini");
+  assert.equal(result.model, saved.model);
+  assert.equal(result.quality, "");
+  assert.equal(result.models.length, 2);
+  assert.equal(app.provider(), "gemini");
+  assert.equal(app.values.get("imageGeneration.apiProvider"), "gemini");
+  assert.equal((await app.setConnection("api")).provider, "gemini");
+  const restarted = subject(async () => geminiCatalog(), Object.fromEntries(app.values));
+  assert.equal(restarted.provider(), "gemini");
+  assert.equal((await restarted.readSettings()).model, saved.model);
+  assert.equal(restarted.getProvider().constructor.name, "GeminiImageProvider");
+});
+
+test("Gemini validation and persistence failures keep the previous key, provider and connection", async () => {
+  const initial = {
+    [keyPref]: "sk-or-existing", "imageGeneration.apiProvider": "openrouter",
+    "imageGeneration.connection": "codex", "imageGeneration.gemini": { model: "retired", quality: "high" },
+  };
+  for (const [fetch, persist] of [
+    [async () => Response.json({ error: { details: [{ reason: "API_KEY_INVALID" }] } }, { status: 400 }), true],
+    [async () => Response.json({ models: [{ name: "models/gemini-3.8-flash" }] }), true],
+    [async () => geminiCatalog(), false],
+  ]) {
+    const app = subject(fetch, initial, persist);
+    await assert.rejects(app.save("new-gemini-key", "gemini"));
+    assert.deepEqual(Object.fromEntries(app.values), initial);
+  }
+});
+
+test("explicit providers reject unknown choices and switching away from Gemini replaces its routing", async () => {
+  const app = subject(async () => catalog(), { [keyPref]: "gemini-test-key", "imageGeneration.apiProvider": "gemini" });
+  await assert.rejects(app.save("key", "unknown"), /Choose/);
+  assert.equal(app.writes(), 0);
+  await app.save("sk-new", "openai");
+  assert.equal(app.provider(), "openai");
+  assert.equal(app.values.get("imageGeneration.apiProvider"), "openai");
+});
+
+test("Gemini key removal keeps its model choice and failed removal restores its key", () => {
+  const initial = { [keyPref]: "gemini-test-key", "imageGeneration.apiProvider": "gemini", "imageGeneration.gemini": { model: "gemini-3-pro-image", quality: "" } };
+  const app = subject(async () => geminiCatalog(), initial);
+  app.remove();
+  assert.equal(app.values.has(keyPref), false);
+  assert.deepEqual(app.values.get("imageGeneration.gemini"), initial["imageGeneration.gemini"]);
+  const failed = subject(async () => geminiCatalog(), initial, false);
+  assert.throws(() => failed.remove(), /Could not remove/);
+  assert.deepEqual(Object.fromEntries(failed.values), initial);
+});
+
+test("Gemini model choices persist independently and reject unsupported or unsaved choices", async () => {
+  const initial = {
+    [keyPref]: "gemini-test-key", "imageGeneration.apiProvider": "gemini",
+    "imageGeneration.gemini": { model: "gemini-nano-banana-2.1", quality: "" },
+    "imageGeneration.openai": { model: defaultModel, quality: "high" },
+  };
+  const app = subject(async () => geminiCatalog(), initial);
+  for (const invalid of [{ model: "text-model", quality: "" }, { model: "gemini-3-pro-image", quality: "high" }]) {
+    await assert.rejects(app.saveImageSettings("gemini", "gemini-test-key", invalid));
+    assert.equal(app.writes(), 0);
+  }
+  const choice = { model: "gemini-3-pro-image", quality: "" };
+  await app.saveImageSettings("gemini", "gemini-test-key", choice);
+  assert.deepEqual(app.values.get("imageGeneration.gemini"), choice);
+  assert.deepEqual(app.values.get("imageGeneration.openai"), initial["imageGeneration.openai"]);
+  const failed = subject(async () => geminiCatalog(), initial, false);
+  await assert.rejects(failed.saveImageSettings("gemini", "gemini-test-key", choice), /Could not save/);
+  assert.deepEqual(Object.fromEntries(failed.values), initial);
 });

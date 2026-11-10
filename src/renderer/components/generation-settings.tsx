@@ -5,6 +5,13 @@ import { ipc } from "@/gen/ipc"
 import type { CodexStatus, GetGenerationSettingsResponse, ImageModelOption } from "@/gen/app"
 
 const label = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
+const apiProviders = {
+  openai: { name: "OpenAI", url: "https://platform.openai.com/api-keys" },
+  openrouter: { name: "OpenRouter", url: "https://openrouter.ai/keys" },
+  gemini: { name: "Google Gemini", url: "https://aistudio.google.com/api-keys" },
+}
+type ApiProvider = keyof typeof apiProviders
+const isApiProvider = (value: string): value is ApiProvider => Object.hasOwn(apiProviders, value)
 
 function defaultsFor(model: ImageModelOption, quality = "") {
   return {
@@ -37,6 +44,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const [keyBackStep, setKeyBackStep] = useState<"connection" | "models">("connection")
   const [modelsBackStep, setModelsBackStep] = useState<"connection" | "key">("key")
   const [apiKey, setApiKey] = useState("")
+  const [apiProvider, setApiProvider] = useState<ApiProvider>("openai")
   const [showKey, setShowKey] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -74,13 +82,17 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     setLoading(!!settings?.hasApiKey)
     setStep("key")
     setApiKey("")
+    setApiProvider(settings && isApiProvider(settings.provider) ? settings.provider : "openai")
     setShowKey(false)
     setError(existingError)
     setOpen(true)
     if (!settings?.hasApiKey) return
     try {
       const response = await ipc.app.GetStoredOpenAIApiKey({})
-      if (version === requestVersion.current) setApiKey(response.apiKey)
+      if (version === requestVersion.current) {
+        setApiKey(response.apiKey)
+        if (isApiProvider(response.provider)) setApiProvider(response.provider)
+      }
     } catch {
       if (version === requestVersion.current) setError("Could not load the saved API key. Enter it again to continue.")
     } finally { if (version === requestVersion.current) setLoading(false) }
@@ -266,7 +278,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const selected = settings?.models.find((model) => model.id === draft.model)
   const current = settings?.models.find((model) => model.id === settings.model)
   // Model results are only returned after the provider accepts the saved key.
-  const canRemoveKey = !!settings?.apiKeyRequired && settings.hasApiKey &&
+  const canRemoveKey = !!settings?.apiKeyRequired && settings.hasApiKey && apiProvider === settings.provider &&
     settings.models.length > 0 && !settings.error
   const close = () => {
     if (saving) return
@@ -316,7 +328,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     setSaving(true)
     setError("")
     try {
-      const response = await ipc.app.SetOpenAIApiKey({ apiKey: apiKey.trim() })
+      const response = await ipc.app.SetOpenAIApiKey({ apiKey: apiKey.trim(), provider: apiProvider })
       if (version !== requestVersion.current) return
       if (response.error || !response.settings) {
         setError(response.error || "Could not check the API key. Try again.")
@@ -407,7 +419,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
           {step !== "models" && <p id="generation-settings-description" className="text-xs text-muted-foreground mt-1">{step === "connection"
             ? "Choose how MōIcons generates your icons." : step === "codex"
             ? "Generate with your ChatGPT account through the desktop app." : step === "remove"
-            ? "Remove the saved key from MōIcons." : "Connect OpenAI or OpenRouter to generate icons."}</p>}
+            ? "Remove the saved key from MōIcons." : "Choose your provider and enter its API key."}</p>}
         </div>
         <form onSubmit={(event) => {
           event.preventDefault()
@@ -425,7 +437,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
               </button>
               <button type="button" onClick={() => void chooseApi()} disabled={saving} className="group flex w-full items-center gap-3 rounded-xl border border-border bg-secondary/30 p-4 text-left transition-colors hover:border-primary/50 hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground"><KeyRound className="h-5 w-5" /></span>
-                <span className="flex-1"><span className="text-sm font-medium">API key</span><span className="mt-1 block text-xs leading-relaxed text-muted-foreground">Connect OpenAI or OpenRouter.<br />Usage is billed by your provider.</span></span>
+                <span className="flex-1"><span className="text-sm font-medium">API key</span><span className="mt-1 block text-xs leading-relaxed text-muted-foreground">Connect OpenAI, OpenRouter, or Google Gemini.<br />Usage is billed by your provider.</span></span>
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </button>
             </div> : step === "codex" ? <div className="space-y-4">
@@ -458,7 +470,23 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
               {!codexMissing && !savedAppPath && codex?.state !== "waiting" && <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-xs font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><FolderOpen aria-hidden="true" className="h-3.5 w-3.5" />Browse…</button>}
-            </div> : step === "remove" ? null : step === "key" ? <div>
+            </div> : step === "remove" ? null : step === "key" ? <div className="space-y-4">
+              <div>
+                <label htmlFor="generation-api-provider" className="mb-2 block text-sm font-medium">API provider</label>
+                <div className="relative">
+                  <select id="generation-api-provider" value={apiProvider} disabled={saving || loading}
+                    onChange={(event) => {
+                      const provider = event.target.value
+                      if (!isApiProvider(provider)) return
+                      setApiProvider(provider); setApiKey(""); setShowKey(false); setError("")
+                      keyInput.current?.focus()
+                    }}
+                    className="w-full h-10 appearance-none rounded-lg border border-border bg-secondary pl-3 pr-10 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-50">
+                    {Object.entries(apiProviders).map(([id, provider]) => <option key={id} value={id}>{provider.name}</option>)}
+                  </select>
+                  <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                </div>
+              </div>
               <label htmlFor="generation-api-key" className="sr-only">API key</label>
               <div className="relative">
                 <input
@@ -473,10 +501,11 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">We check your key without generating an image.{apiProvider === "gemini" && " Image generation requires paid Gemini API billing; a Gemini subscription alone is not enough."}</p>
             </div> : <>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label htmlFor="generation-model" className="text-sm font-medium">{settings?.provider === "openrouter" ? "OpenRouter model" : settings?.provider === "openai" ? "OpenAI model" : "Model"}</label>
+                  <label htmlFor="generation-model" className="text-sm font-medium">{settings && isApiProvider(settings.provider) ? `${apiProviders[settings.provider].name} model` : "Model"}</label>
                   <button type="button" onClick={refresh} disabled={loading || saving} aria-label="Refresh models" title={loading ? "Loading models…" : "Refresh models"} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50">
                     <RefreshCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
                   </button>
@@ -497,6 +526,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                   <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 </div>
               </div>
+              {settings?.provider === "gemini" && <p className="text-xs leading-relaxed text-muted-foreground">Square 1K images, billed through the Gemini API. Checking your key does not confirm available image quota.{draft.model === "gemini-3.1-flash-lite-image" && " Lite is best for quick drafts; choose Nano Banana 2.1 or Pro for repeated refinements."}</p>}
               {!!selected?.qualities.length && <fieldset disabled={loading || saving}>
                 <legend className="text-sm font-medium mb-2">Effort</legend>
                 <div className="flex flex-wrap gap-1 rounded-lg bg-secondary/60 p-1">
@@ -515,8 +545,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
             {step === "codex" ? <button type="button" disabled={saving} onClick={chooseConnection} className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" />{codexSelected ? "Change method" : "Back"}</button> : step === "remove" ? <button ref={cancelRemoval} type="button" disabled={saving} onClick={() => { setError(""); setStep("key") }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
               : step === "key" ? <div className="flex items-center gap-1">
                 {canRemoveKey && <button type="button" disabled={saving || loading} onClick={() => { setShowKey(false); setError(""); setStep("remove") }} aria-label="Remove API key" title="Remove API key" className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><Trash2 aria-hidden="true" className="h-4 w-4" /></button>}
-                <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://platform.openai.com/api-keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenAI <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
-                <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: "https://openrouter.ai/keys" }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">OpenRouter <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: apiProviders[apiProvider].url }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">Get API key <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
               </div>
               : settings?.apiKeyRequired ? <div className="flex gap-1">
                 <button type="button" disabled={saving} onClick={() => {

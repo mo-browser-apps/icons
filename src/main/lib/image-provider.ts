@@ -1,9 +1,10 @@
 import { OpenAIProvider } from "./providers/openai";
 import { OpenRouterProvider } from "./providers/openrouter";
 import { MockImageProvider } from "./providers/mock";
-import { getResolvedApiKey, detectProviderFromKey } from "./openai-api-key";
+import { getStoredApiProvider } from "./openai-api-key";
 import { usesCodex, isConnectionDisconnected } from "./generation-connection";
 import { CodexImageProvider } from "./providers/codex";
+import { GeminiImageProvider } from "./providers/gemini";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -36,7 +37,7 @@ export interface ImageProvider {
 // Supported providers
 // ---------------------------------------------------------------------------
 
-export type ProviderName = "openai" | "openrouter" | "mock" | "codex";
+export type ProviderName = "openai" | "openrouter" | "gemini" | "mock" | "codex";
 
 // ---------------------------------------------------------------------------
 // Provider resolution — one cached instance per provider name
@@ -49,17 +50,16 @@ const _instances: Partial<Record<ProviderName, ImageProvider>> = {};
  *
  * An explicit `ICON_PROVIDER` environment variable always wins (handy for
  * `mock` during development, or to pin a provider). Otherwise the provider is
- * resolved from the saved connection choice, falling back to the stored API key
- * for existing installations. An `sk-or-…` key selects OpenRouter, and anything
- * else selects OpenAI. Re-evaluated on every call so switching takes effect immediately.
+ * resolved from the saved connection and API provider. Legacy installations fall
+ * back to the key prefix. Re-evaluated on every call so switching takes effect immediately.
  */
 export function resolveProviderName(): ProviderName {
   const forced = process.env.ICON_PROVIDER?.trim() as ProviderName | undefined;
-  if (forced === "mock" || forced === "openai" || forced === "openrouter" || forced === "codex") {
+  if (forced === "mock" || forced === "openai" || forced === "openrouter" || forced === "gemini" || forced === "codex") {
     return forced;
   }
   if (usesCodex()) return "codex";
-  return detectProviderFromKey(getResolvedApiKey());
+  return getStoredApiProvider();
 }
 
 /**
@@ -69,6 +69,7 @@ export function resolveProviderName(): ProviderName {
  *   - codex:     installed Codex with a ChatGPT sign-in
  *   - openai:     `sk-…` key in app preferences
  *   - openrouter: `sk-or-…` key in app preferences (model via OPENROUTER_MODEL)
+ *   - gemini:    Google AI Studio API key and paid Gemini API billing
  *   - mock:       none (placeholder images only, for local testing)
  */
 export function getProvider(): ImageProvider {
@@ -79,6 +80,9 @@ export function getProvider(): ImageProvider {
 
   let created: ImageProvider;
   switch (name) {
+    case "gemini":
+      created = new GeminiImageProvider();
+      break;
     case "codex":
       created = new CodexImageProvider();
       break;

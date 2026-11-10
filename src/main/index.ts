@@ -40,6 +40,7 @@ import { getCodexAppPath } from './lib/codex-location';
 import { closeCodexSessions } from './lib/codex-client';
 import {
   getResolvedApiKey,
+  getStoredApiProvider,
   hasApiKeyInPrefs,
 } from './lib/openai-api-key';
 
@@ -529,7 +530,7 @@ ipc.registerService(AppServiceDescriptor, {
   ): Promise<GetOpenAIApiKeyStatusResponse> {
     const provider = resolveProviderName();
     return {
-      openaiKeyRequired: provider === 'openai' || provider === 'openrouter',
+      openaiKeyRequired: provider === 'openai' || provider === 'openrouter' || provider === 'gemini',
       hasOpenaiKey: hasApiKeyInPrefs(),
     };
   },
@@ -555,14 +556,14 @@ ipc.registerService(AppServiceDescriptor, {
   async GetStoredOpenAIApiKey(
     _request: GetStoredOpenAIApiKeyRequest
   ): Promise<GetStoredOpenAIApiKeyResponse> {
-    return { apiKey: getResolvedApiKey() };
+    return { apiKey: getResolvedApiKey(), provider: getStoredApiProvider() };
   },
 
   async SetOpenAIApiKey(
     request: SetOpenAIApiKeyRequest
   ): Promise<SetOpenAIApiKeyResponse> {
     try {
-      const settings = await saveValidatedApiKey(request.apiKey);
+      const settings = await saveValidatedApiKey(request.apiKey, request.provider);
       return { error: '', settings };
     } catch (err) {
       return { error: err instanceof Error ? err.message : 'Could not check the API key. Try again.', settings: undefined };

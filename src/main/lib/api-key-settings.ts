@@ -1,7 +1,7 @@
 import { prefs } from "@mobrowser/api";
 import { getImageSettings } from "./generation-settings";
 import { listImageModels } from "./image-models";
-import { API_KEY_PREFS_KEY, detectProviderFromKey } from "./openai-api-key";
+import { API_KEY_PREFS_KEY, API_PROVIDER_PREFS_KEY, detectProviderFromKey, isApiProvider } from "./openai-api-key";
 import { CONNECTION_PREF } from "./generation-connection";
 
 /** Disconnect locally while retaining each provider's model preferences. */
@@ -16,14 +16,15 @@ export function removeStoredApiKey(): void {
 }
 
 /** Validate using read-only requests before replacing any saved preferences. */
-export async function saveValidatedApiKey(input: string) {
+export async function saveValidatedApiKey(input: string, selectedProvider = "") {
   const apiKey = input.trim();
   if (!apiKey) throw new Error("Enter an API key to continue.");
-  const provider = detectProviderFromKey(apiKey);
+  if (selectedProvider && !isApiProvider(selectedProvider)) throw new Error("Choose OpenAI, OpenRouter, or Google Gemini.");
+  const provider = isApiProvider(selectedProvider) ? selectedProvider : detectProviderFromKey(apiKey);
   const forced = process.env.ICON_PROVIDER?.trim();
   if (forced === "codex") throw new Error("This app is configured to use ChatGPT.");
-  if ((forced === "openai" || forced === "openrouter") && forced !== provider) {
-    throw new Error(`This app is configured to use ${forced === "openai" ? "OpenAI" : "OpenRouter"}. Enter a key for that provider.`);
+  if (forced && isApiProvider(forced) && forced !== provider) {
+    throw new Error(`This app is configured to use ${{ openai: "OpenAI", openrouter: "OpenRouter", gemini: "Google Gemini" }[forced]}. Enter a key for that provider.`);
   }
   const models = await listImageModels(provider, apiKey, true);
   const previousSettings = getImageSettings(provider);
@@ -39,7 +40,10 @@ export async function saveValidatedApiKey(input: string) {
   const hadSettings = prefs.hasObject(settingsKey);
   const hadConnection = prefs.hasString(CONNECTION_PREF);
   const previousConnection = prefs.getString(CONNECTION_PREF);
+  const hadProvider = prefs.hasString(API_PROVIDER_PREFS_KEY);
+  const previousProvider = prefs.getString(API_PROVIDER_PREFS_KEY);
   prefs.setString(API_KEY_PREFS_KEY, apiKey);
+  prefs.setString(API_PROVIDER_PREFS_KEY, provider);
   prefs.setObject(settingsKey, settings);
   prefs.setString(CONNECTION_PREF, "api");
   if (!prefs.persist()) {
@@ -49,6 +53,8 @@ export async function saveValidatedApiKey(input: string) {
     else prefs.remove(settingsKey);
     if (hadConnection) prefs.setString(CONNECTION_PREF, previousConnection);
     else prefs.remove(CONNECTION_PREF);
+    if (hadProvider) prefs.setString(API_PROVIDER_PREFS_KEY, previousProvider);
+    else prefs.remove(API_PROVIDER_PREFS_KEY);
     throw new Error("Could not save preferences. Your previous API key has been kept. Try again.");
   }
   return { provider, ...settings, models, hasApiKey: true, apiKeyRequired: true, error: "", errorCode: "", ready: true, codex: undefined };

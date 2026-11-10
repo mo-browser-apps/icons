@@ -10,7 +10,11 @@ If ChatGPT is installed but cannot be found, select **Browse…** in the status 
 
 Connecting does not generate images. Usage starts when you press **Generate** and uses your Codex allowance and available credits; account limits apply. ChatGPT manages image model and quality. In generation settings, **Change method** lets you choose an API key; **Disconnect from MōIcons** pauses generation until you choose a method again, keeping any saved API key. Neither action signs you out of ChatGPT.
 
-The API option supports the [OpenAI API](https://openai.com/api/) and [OpenRouter](https://openrouter.ai/). Defaults favor fast iteration: GPT Image 2.5 Flare at low quality for OpenAI, and Nano Banana 2 Lite for OpenRouter. Open generation settings to load available image models and choose quality. Choices are saved separately for each provider. OpenAI offers Low, Medium, High, and Auto; OpenRouter controls follow the selected model's capabilities. `OPENROUTER_MODEL` sets the initial OpenRouter model until you save a selection in the app.
+The API option supports the [OpenAI API](https://openai.com/api/), [OpenRouter](https://openrouter.ai/), and [Google Gemini](https://aistudio.google.com/api-keys). Select the provider, enter its API key, and continue. MōIcons checks the key and loads compatible image models without generating an image. A failed check keeps your previous connection. The app stores one API key at a time; changing providers replaces it only after validation succeeds.
+
+Defaults favor fast iteration: GPT Image 2.5 Flare at low quality for OpenAI, Nano Banana 2 Lite for OpenRouter, and Nano Banana 2.1 for Gemini when listed by Google. Open generation settings to refresh available image models and choose a model. Choices are saved separately for each provider. OpenAI offers Low, Medium, High, and Auto; OpenRouter controls follow the selected model's capabilities. Gemini offers Nano Banana 2.1, Nano Banana 2 Lite, Nano Banana 2, and Nano Banana Pro when returned by its model catalog, using square 1K output and Google's default thinking settings. Lite is best for quick drafts; other models are better suited to repeated refinements. `OPENROUTER_MODEL` sets the initial OpenRouter model until you save a selection in the app.
+
+Direct Gemini requires an AI Studio API key and paid Gemini API billing. Checking a key confirms API access and compatible models, but does not confirm remaining image quota or billing eligibility for generation. Gemini subscriptions do not directly authorize generation in MōIcons; eligible Google Cloud credits may offset API charges after billing setup. See [Gemini billing](https://ai.google.dev/gemini-api/docs/billing), [pricing](https://ai.google.dev/gemini-api/docs/pricing), and your [active limits](https://aistudio.google.com/rate-limit). Gemini variants are requested sequentially, without automatic retries; completed variants survive a later failure. Stop cancels active requests and prevents later variants, but work already processed by Google may still be billed.
 
 Here's a short video demonstrating the app in action:
 
@@ -62,7 +66,7 @@ MōIcons discovers ChatGPT and older Codex apps by their macOS bundle identifier
 Run provider and connection tests without API calls:
 
 ```bash
-node --test tests/api-key-settings.mjs tests/image-models.mjs tests/openrouter.mjs tests/codex.mjs tests/codex-discovery.mjs tests/codex-location.mjs tests/codex-startup.mjs tests/image-requests.mjs
+node --test tests/api-key-settings.mjs tests/image-models.mjs tests/gemini.mjs tests/generation-errors.mjs tests/openrouter.mjs tests/codex.mjs tests/codex-discovery.mjs tests/codex-location.mjs tests/codex-startup.mjs tests/image-requests.mjs
 ```
 
 For attachment, cancellation and refinement regressions, start

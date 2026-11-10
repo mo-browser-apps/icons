@@ -47,10 +47,10 @@ const wait = async (fn) => {
   }
   throw new Error(`Timed out: ${fn}`);
 };
-const click = async (name) => {
-  const selector = await evaluate(async (name) => {
+const click = async (name, scope = "#settings-test button, dialog[open] button") => {
+  const selector = await evaluate(async (name, scope) => {
     for (let attempt = 0; attempt < 100; attempt++) {
-      const button = [...document.querySelectorAll("#settings-test button, dialog[open] button")]
+      const button = [...document.querySelectorAll(scope)]
         .find((button) => (button.getAttribute("aria-label") || button.textContent.trim()) === name);
       if (button && !button.disabled) {
         button.dataset.testClick = "true";
@@ -59,7 +59,7 @@ const click = async (name) => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new Error(`No enabled button: ${name}`);
-  }, name);
+  }, name, scope);
   if (command) {
     const point = await evaluate((selector) => {
       const rect = document.querySelector(selector).getBoundingClientRect();
@@ -95,6 +95,7 @@ try {
     const { default: React } = await import(loaded("/react.js"));
     const { default: { createRoot } } = await import(loaded("/react-dom_client.js"));
     const { GenerationSettings } = await import(loaded("/components/generation-settings.tsx"));
+    const { ErrorModal, generationErrorSuggestsConnectionIssue } = await import(loaded("/components/error-modal.tsx"));
     const state = window.__settingsTest = {
       ipc, originals: { ...ipc.app }, savedKey: "sk-test-saved-key", mode: "success", writes: 0, reads: 0,
       settings: { provider: "openai", model: "gpt-image-1", quality: "high", models: [{ id: "gpt-image-1", name: "GPT Image 1", qualities: ["low", "medium", "high"] }], hasApiKey: true, apiKeyRequired: true, ready: true, error: "", errorCode: "" },
@@ -125,6 +126,50 @@ try {
     state.container.style.padding = "80px 24px";
     state.root = createRoot(state.container);
     state.root.render(React.createElement(GenerationSettings, { disabled: false, connectionRequest: 0, onReadyChange: () => {} }));
+    state.mountGemini = () => {
+      state.savedKey = "sk-existing";
+      state.mode = "invalid-gemini";
+      state.keyChecks = [];
+      state.modelWrites = [];
+      state.externalUrls = [];
+      state.geminiModels = [
+        { id: "gemini-nano-banana-2.1", name: "Nano Banana 2.1", qualities: [] },
+        { id: "gemini-3-pro-image", name: "Nano Banana Pro", qualities: [] },
+        { id: "gemini-3.1-flash-lite-image", name: "Nano Banana 2 Lite", qualities: [] },
+      ];
+      state.settings = { provider: "openai", model: "gpt-image-1", quality: "high", models: [{ id: "gpt-image-1", name: "GPT Image 1", qualities: ["low", "high"] }], hasApiKey: true, apiKeyRequired: true, ready: true, error: "", errorCode: "" };
+      ipc.app.GetStoredOpenAIApiKey = async () => ({ apiKey: state.savedKey, provider: state.settings.provider });
+      ipc.app.SetOpenAIApiKey = async (request) => {
+        state.keyChecks.push(request);
+        if (state.mode === "invalid-gemini") return { error: "Gemini rejected this API key. Create or check the key in Google AI Studio." };
+        state.savedKey = request.apiKey;
+        state.settings = { ...state.settings, provider: request.provider, model: state.geminiModels[0].id, quality: "", models: state.geminiModels };
+        return { error: "", settings: state.settings };
+      };
+      ipc.app.SetGenerationSettings = async (request) => {
+        state.modelWrites.push(request);
+        state.settings = { ...state.settings, ...request };
+        return { error: "" };
+      };
+      ipc.app.OpenExternalUrl = async ({ url }) => { state.externalUrls.push(url); return {}; };
+      state.root.render(React.createElement(GenerationSettings, { key: "gemini", disabled: false, connectionRequest: 0, onReadyChange: () => {} }));
+    };
+    state.mountGeminiError = (message) => {
+      const onReadyChange = () => {};
+      function Recovery() {
+        const [error, setError] = React.useState(message);
+        const [connectionRequest, setConnectionRequest] = React.useState(0);
+        return React.createElement(React.Fragment, null,
+          React.createElement(GenerationSettings, { disabled: false, connectionRequest, onReadyChange }),
+          error && React.createElement(ErrorModal, {
+            message: error,
+            onClose: () => setError(""),
+            onOpenSettings: generationErrorSuggestsConnectionIssue(error)
+              ? () => { setError(""); setConnectionRequest((value) => value + 1); } : undefined,
+          }));
+      }
+      state.root.render(React.createElement(Recovery));
+    };
     state.mountCodex = () => {
       state.savedPath = "";
       state.pathWrites = [];
@@ -219,7 +264,7 @@ try {
   await click("Generation settings");
   await click("Change method");
   await screenshot("connection");
-  await click("API keyConnect OpenAI or OpenRouter.Usage is billed by your provider.");
+  await click("API keyConnect OpenAI, OpenRouter, or Google Gemini.Usage is billed by your provider.");
   await wait(() => !!document.querySelector("dialog[open] #generation-api-key:not(:disabled)"));
   assert.ok(await keyMatches("sk-test-saved-key"));
   check("a failed connection also prefills the saved key for correction");
@@ -237,12 +282,81 @@ try {
   await click("Remove key");
   await wait(() => document.querySelector("dialog[open] h2")?.textContent === "Connect to generate");
   const reads = await evaluate(() => window.__settingsTest.reads);
-  await click("API keyConnect OpenAI or OpenRouter.Usage is billed by your provider.");
+  await click("API keyConnect OpenAI, OpenRouter, or Google Gemini.Usage is billed by your provider.");
   assert.ok(await keyMatches(""));
   assert.equal(await evaluate(() => window.__settingsTest.reads), reads);
   assert.equal(await evaluate(() => !!document.querySelector('dialog[open] [aria-label="Remove API key"]')), false);
   check("deletion handles errors, requires confirmation, and returns to empty-key setup");
   await click("Close generation settings");
+
+  await evaluate(() => window.__settingsTest.mountGemini());
+  await wait(() => document.querySelector("#settings-test button")?.textContent.includes("GPT Image 1"));
+  await openKey();
+  await evaluate(() => {
+    const select = document.querySelector("#generation-api-provider");
+    select.value = "gemini";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  assert.ok(await keyMatches(""));
+  await click("Get API key");
+  assert.deepEqual(await evaluate(() => window.__settingsTest.externalUrls), ["https://aistudio.google.com/api-keys"]);
+  await fillKey("gemini-invalid-test");
+  await click("Continue");
+  await wait(() => document.querySelector("dialog[open] [role=alert]")?.textContent.includes("Gemini rejected"));
+  assert.equal(await evaluate(() => window.__settingsTest.savedKey), "sk-existing");
+  assert.equal(await evaluate(() => window.__settingsTest.keyChecks[0].provider), "gemini");
+  await screenshot("gemini-invalid-key");
+  check("Gemini selection clears the old key, links to AI Studio, and keeps validation failures editable");
+
+  await evaluate(() => { window.__settingsTest.mode = "success"; });
+  await fillKey("gemini-valid-test");
+  await click("Continue");
+  await wait(() => !!document.querySelector("dialog[open] #generation-model"));
+  assert.deepEqual(await evaluate(() => [...document.querySelector("#generation-model").options].map((option) => option.textContent)), ["Nano Banana 2.1", "Nano Banana Pro", "Nano Banana 2 Lite"]);
+  assert.equal(await evaluate(() => !!document.querySelector("dialog[open] fieldset")), false);
+  assert.match(await evaluate(() => document.querySelector("dialog[open]").textContent), /does not confirm available image quota/);
+  await screenshot("gemini-models");
+  await evaluate(() => {
+    const select = document.querySelector("#generation-model");
+    select.value = "gemini-3-pro-image";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await click("Done");
+  await click("Generation settings");
+  assert.equal(await evaluate(() => document.querySelector("#generation-model").value), "gemini-3-pro-image");
+  assert.deepEqual(await evaluate(() => window.__settingsTest.modelWrites[0]), { provider: "gemini", model: "gemini-3-pro-image", quality: "" });
+  check("Gemini models are selectable and saved without unsupported OpenAI effort controls");
+
+  await evaluate(() => {
+    const state = window.__settingsTest;
+    state.settings.models = state.geminiModels.filter((model) => model.id !== "gemini-3-pro-image");
+  });
+  await click("Refresh models");
+  await wait(() => document.querySelector("#generation-model")?.value === "gemini-nano-banana-2.1");
+  await click("Done");
+  await openKey();
+  assert.equal(await evaluate(() => document.querySelector("#generation-api-provider").value), "gemini");
+  assert.ok(await keyMatches("gemini-valid-test"));
+  await screenshot("gemini-key");
+  await click("Close generation settings");
+  check("refresh handles a removed model and reopening retains the Gemini provider and masked key");
+
+  for (const message of [
+    "Gemini rejected this API key. Create or check the key in Google AI Studio.",
+    "This key cannot access Gemini. Check its API restrictions, project permissions, billing, and region in Google AI Studio.",
+  ]) {
+    await evaluate((message) => window.__settingsTest.mountGeminiError(message), message);
+    await wait(() => !![...document.querySelectorAll("#settings-test button")].find((button) => button.textContent.trim() === "Generation settings"));
+    await screenshot(message.startsWith("Gemini") ? "gemini-key-recovery" : "gemini-permission-recovery");
+    await click("Generation settings", "#settings-test .fixed button");
+    await wait(() => document.querySelector("dialog[open] h2")?.textContent === "Connect to generate");
+    await click("API keyConnect OpenAI, OpenRouter, or Google Gemini.Usage is billed by your provider.");
+    await wait(() => !!document.querySelector("dialog[open] #generation-api-key:not(:disabled)"));
+    assert.equal(await evaluate(() => document.querySelector("#generation-api-provider").value), "gemini");
+    assert.ok(await keyMatches("gemini-valid-test"));
+    await click("Close generation settings");
+  }
+  check("Gemini authentication and permission errors open settings and return to the saved provider and key");
 
   await evaluate(() => window.__settingsTest.mountCodex());
   await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("ChatGPT could not be found"));

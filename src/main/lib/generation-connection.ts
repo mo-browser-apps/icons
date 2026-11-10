@@ -5,7 +5,7 @@ export function usesCodex(): boolean { return prefs.getString(CONNECTION_PREF) =
 
 export function isConnectionDisconnected(): boolean {
   const forced = process.env.ICON_PROVIDER?.trim();
-  if (forced && ["codex", "openai", "openrouter", "mock"].includes(forced)) return false;
+  if (forced && ["codex", "openai", "openrouter", "gemini", "mock"].includes(forced)) return false;
   return prefs.getString(CONNECTION_PREF) === "none";
 }
 
