@@ -1,7 +1,7 @@
 import { getCodexStatus, cancelCodexLogin } from "./codex-account";
 import { saveConnection } from "./generation-connection";
 import { listImageModels } from "./image-models";
-import { detectProviderFromKey, getResolvedApiKey, hasApiKeyInPrefs } from "./openai-api-key";
+import { getStoredApiProvider, getResolvedApiKey, hasApiKeyInPrefs } from "./openai-api-key";
 import { readGenerationSettings } from "./read-generation-settings";
 
 export async function setGenerationConnection(connection: string, generationRunning: boolean) {
@@ -17,7 +17,7 @@ export async function setGenerationConnection(connection: string, generationRunn
     saveConnection("codex");
   } else if (connection === "api") {
     if (!hasApiKeyInPrefs()) throw new Error("Add an API key before continuing.");
-    await listImageModels(detectProviderFromKey(getResolvedApiKey()), getResolvedApiKey(), true);
+    await listImageModels(getStoredApiProvider(), getResolvedApiKey(), true);
     saveConnection("api");
   } else if (connection === "none") {
     if (generationRunning) throw new Error("Stop generation before disconnecting.");

@@ -137,6 +137,8 @@ message GetOpenAIApiKeyStatusResponse {
 
 message SetOpenAIApiKeyRequest {
   string api_key = 1;
+  // openai, openrouter, or gemini. Empty retains legacy key-prefix detection.
+  string provider = 2;
 }
 
 message SetOpenAIApiKeyResponse {
@@ -154,6 +156,7 @@ message GetStoredOpenAIApiKeyRequest {}
 message GetStoredOpenAIApiKeyResponse {
   // Value from app preferences; empty if none saved.
   string api_key = 1;
+  string provider = 2;
 }
 
 message OpenExternalUrlRequest {

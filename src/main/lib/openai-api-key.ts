@@ -3,12 +3,21 @@ import { prefs } from '@mobrowser/api';
 /**
  * Preferences key for the stored image-generation API key (kept in prefs.json).
  *
- * The same slot holds either an OpenAI key (`sk-…`) or an OpenRouter key
- * (`sk-or-…`); the active provider is inferred from the key's prefix at call
- * time — see `detectProviderFromKey`.  The legacy name is preserved so existing
- * preferences continue to resolve after upgrade.
+ * One saved API key, with an explicit provider for new connections. The legacy
+ * slot and prefix fallback keep existing OpenAI/OpenRouter installations working.
  */
 export const API_KEY_PREFS_KEY = 'openai.apiKey';
+export const API_PROVIDER_PREFS_KEY = 'imageGeneration.apiProvider';
+export type ApiProvider = 'openai' | 'openrouter' | 'gemini';
+
+export function isApiProvider(value: string): value is ApiProvider {
+  return value === 'openai' || value === 'openrouter' || value === 'gemini';
+}
+
+export function getStoredApiProvider(): ApiProvider {
+  const saved = prefs.getString(API_PROVIDER_PREFS_KEY);
+  return isApiProvider(saved) ? saved : detectProviderFromKey(getResolvedApiKey());
+}
 
 /** Backwards-compatible alias for the preferences key. */
 export const OPENAI_API_KEY_PREFS_KEY = API_KEY_PREFS_KEY;
