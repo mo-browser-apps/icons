@@ -9,6 +9,7 @@
     "dev:build": "mobrowser dev:build",
     "build": "mobrowser build",
     "pack": "mobrowser pack",
+    "release": "npm run build -- --verbose && npm run pack -- --verbose",
     "gen": "mobrowser gen",
     "mobrowser": "mobrowser"
   },
