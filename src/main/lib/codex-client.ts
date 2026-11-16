@@ -6,14 +6,21 @@ import { fallbackBinPaths, findCodexCandidates } from "./codex-discovery";
 
 export { findCodex } from "./codex-discovery";
 
+export interface CodexTurnError {
+  message?: string;
+  codexErrorInfo?: unknown;
+}
+
 export interface CodexEvent {
   method: string;
   params: {
     threadId?: string;
     loginId?: string;
     success?: boolean;
+    error?: CodexTurnError;
+    willRetry?: boolean;
     item?: { id: string; type: string; status?: string; result?: string; failure?: { type: string } };
-    turn?: { id: string; status: string; error?: { codexErrorInfo?: unknown } };
+    turn?: { id: string; status: string; error?: CodexTurnError | null };
   };
 }
 

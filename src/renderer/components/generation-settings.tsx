@@ -219,9 +219,9 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     catch { setError("Could not cancel sign-in. Close this window and try again.") }
     finally { setSaving(false) }
   }
-  const codexAction = async () => {
+  const codexAction = async (signInAgain = false) => {
     if (saving || checkingCodex || !codex) return
-    if (codexConnected || codexMissing) { close(); return }
+    if ((codexConnected && !signInAgain) || codexMissing) { close(); return }
     if (codex.state === "waiting") return
     if (codex.state === "error") { await checkCodex(); return }
     setSaving(true)
@@ -229,7 +229,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     try {
       if (codex.state === "update_required") {
         await ipc.app.OpenExternalUrl({ url: "https://learn.chatgpt.com/docs/app" })
-      } else if (codex.state === "ready") {
+      } else if (codex.state === "ready" && !signInAgain) {
         const response = await ipc.app.SetGenerationConnection({ connection: "codex" })
         applySettings(response)
         if (response.ready) { setOpen(false); trigger.current?.focus() }
@@ -465,8 +465,9 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                 </div>}
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">Generation uses your plan’s allowance and available credits. Usage starts when you press Generate.</p>
-              {!codexConnected && !codexMissing && <div className="flex items-center gap-4 text-xs">
-                <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>
+              {!codexMissing && <div className="flex items-center gap-4 text-xs">
+                {codex?.state === "ready" && <button type="button" disabled={saving || checkingCodex} onClick={() => void codexAction(true)} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Sign in again</button>}
+                {!codexConnected && <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void checkCodex()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Check again</button>}
                 {codex?.state === "waiting" && <button type="button" disabled={saving} onClick={() => void cancelLogin()} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Cancel sign-in</button>}
               </div>}
               {!codexMissing && !savedAppPath && codex?.state !== "waiting" && <button type="button" disabled={saving || checkingCodex} onClick={() => void chooseAppLocation()} className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-xs font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><FolderOpen aria-hidden="true" className="h-3.5 w-3.5" />Browse…</button>}

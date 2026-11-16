@@ -1,10 +1,29 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CodexClient } from "../codex-client";
+import { CodexClient, type CodexTurnError } from "../codex-client";
 import type { CodexAccount } from "../codex-account";
 import type { GenerationRequest, GenerationResult, ImageProvider } from "../image-provider";
 
 const canceled = () => new Error("Generation stopped.");
+
+function generationError(error?: CodexTurnError | null): Error {
+  // Inspect server details to select actionable copy, without displaying raw
+  // responses (which may include private prompts or account information).
+  const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
+  if (/requires a newer version|upgrade to the latest|client.*outdated/.test(message)) {
+    return new Error("The ChatGPT copy MōIcons connected to is too old for the selected model. Update ChatGPT, or choose your current ChatGPT app in generation settings. If an installer disk is mounted, eject it and try again.");
+  }
+  if (error?.codexErrorInfo === "usageLimitExceeded" || error?.codexErrorInfo === "rateLimitExceeded") {
+    return new Error("Your ChatGPT usage limit has been reached. Check your usage in the ChatGPT desktop app or choose an API key in generation settings.");
+  }
+  if (error?.codexErrorInfo === "unauthorized") {
+    return new Error("Your ChatGPT sign-in has expired or was rejected. Sign in again in generation settings.");
+  }
+  if (error?.codexErrorInfo === "modelNotFound") {
+    return new Error("The selected model is not available through this ChatGPT connection. Check your model and account in the ChatGPT desktop app, then try again.");
+  }
+  return new Error("The ChatGPT request failed before an image was returned. Check your connection and the ChatGPT desktop app, then try again. No automatic retry was made.");
+}
 
 export function imageResult(result: string | undefined): string {
   const base64 = (typeof result === "string" ? result : "").replace(/^data:image\/(png|jpeg|webp);base64,/, "");
@@ -25,6 +44,7 @@ async function generateOne(client: CodexClient, threadId: string, input: unknown
   let turnId: string | undefined;
   let result: string | undefined;
   let imageError: Error | undefined;
+  let turnError: Error | undefined;
   let turnCompleted = false;
   let unsubscribe = () => {};
   let timer: ReturnType<typeof setTimeout>;
@@ -38,6 +58,7 @@ async function generateOne(client: CodexClient, threadId: string, input: unknown
     unsubscribe = client.subscribe((event) => {
       if (event.params.threadId !== threadId) return;
       if (event.method === "turn/started") turnId = event.params.turn?.id;
+      if (event.method === "error" && !event.params.willRetry) turnError = generationError(event.params.error);
       const item = event.params.item;
       if (event.method === "item/completed" && item?.type === "imageGeneration") {
         if (item.failure?.type === "usageLimitExceeded") {
@@ -52,8 +73,10 @@ async function generateOne(client: CodexClient, threadId: string, input: unknown
       if (event.method === "turn/completed") {
         turnCompleted = true;
         if (result) resolve(result);
-        else reject(imageError || new Error(event.params.turn?.status === "interrupted" ? "Generation stopped." :
-          "ChatGPT did not generate an image. Check that image generation is available for your account in the ChatGPT desktop app, or try a different description."));
+        else if (event.params.turn?.status === "interrupted") reject(canceled());
+        else if (event.params.turn?.error) reject(generationError(event.params.turn.error));
+        else if (turnError || event.params.turn?.status === "failed") reject(turnError || generationError());
+        else reject(imageError || new Error("ChatGPT completed the request without returning an image. The image tool may be unavailable for this session, or the request may have been declined. No automatic retry was made."));
       }
     }, reject);
     void client.request<{ turn: { id: string } }>("turn/start", { threadId, input }).then((response) => {
