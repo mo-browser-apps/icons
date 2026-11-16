@@ -8,18 +8,18 @@ let latestOpener = 0
 export function IconPreviewButton({ src, title = 'Icon preview', label = 'Preview icon', children, className = '' }: {
   src?: string | null; title?: string; label?: string; children?: ReactNode; className?: string
 }) {
-  const [opening, setOpening] = useState(false)
   const [error, setError] = useState('')
   return <>
-    <button type="button" aria-label={label} disabled={!src || opening}
+    <button type="button" aria-label={label} disabled={!src}
       className={`icon-preview-button ${className}`} onClick={async event => {
         if (!src) return
         const trigger = event.currentTarget, opener = ++latestOpener
-        setError(''); setOpening(true)
+        setError('')
+        // Open resolves on close. Keep this trigger available so it can reuse
+        // the viewer, including when History switches the image in this button.
         try { await ipc.preview.Open({ png: src, title }) }
         catch { setError('Preview couldn’t open. Please try again.') }
         finally {
-          setOpening(false)
           requestAnimationFrame(() => { if (trigger.isConnected && opener === latestOpener) trigger.focus() })
         }
       }}>

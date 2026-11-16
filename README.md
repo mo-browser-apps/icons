@@ -132,6 +132,9 @@ port 9222 (`MOICONS_CDP_URL` overrides it).
 With an icon preview open, `node tests/icon-preview-zoom.mjs` checks pointer
 anchoring from Fit, below Fit, and during rapid pinches after panning. It uses
 the same debugging endpoint without changing the editor or History.
+With no preview open, `node tests/icon-preview-history-ui.mjs` verifies switching
+History variants in the same viewer, reopening an icon, and restoring focus.
+It uses in-memory History fixtures without provider calls or History writes.
 
 ## Project layout
 
