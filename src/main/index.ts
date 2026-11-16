@@ -3,6 +3,7 @@ import { app, BrowserWindow, workspace, ipc, Menu, MenuItem, MenuWithRole, Theme
 import { exec } from 'node:child_process';
 import { preserveSmallIconAlpha } from './lib/icns-alpha';
 import { IconHistoryStore } from './lib/icon-history';
+import { registerIconPreview } from './lib/icon-preview';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -203,9 +204,18 @@ const editMenu = new MenuWithRole({
 const viewMenu = new Menu({
   label: 'View',
   items: [
-    'zoomReset',
-    'zoomIn',
-    'zoomOut',
+    new MenuItem({ id: 'actualSize', label: 'Actual Size', shortcut: 'CommandOrControl+0', action: () => {
+      if (!iconPreview.zoom('actual')) win.browser.zoom.reset();
+    } }),
+    new MenuItem({ id: 'zoomIn', label: 'Zoom In', shortcut: 'CommandOrControl+Plus', action: () => {
+      if (!iconPreview.zoom('in')) win.browser.zoom.in();
+    } }),
+    new MenuItem({ id: 'zoomOut', label: 'Zoom Out', shortcut: 'CommandOrControl+-', action: () => {
+      if (!iconPreview.zoom('out')) win.browser.zoom.out();
+    } }),
+    new MenuItem({ id: 'fitPreview', label: 'Fit Icon Preview', shortcut: 'CommandOrControl+9', action: () => {
+      iconPreview.zoom('fit');
+    } }),
     'separator',
     'fullScreen',
   ]
@@ -277,6 +287,7 @@ const win = new BrowserWindow({
 });
 win.centerWindow();
 win.show();
+const iconPreview = registerIconPreview(win);
 
 win.handle('close', async () => {
   if (!hasUnsavedIcon) {

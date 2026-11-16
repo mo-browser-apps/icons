@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+message OpenIconPreviewRequest {
+  string png = 1;
+  string title = 2;
+}
+
+message IconPreviewCommand {
+  string action = 1;
+  double factor = 2;
+}
+
+message IconPreviewState {
+  string title = 1;
+  double factor = 2;
+  bool fit = 3;
+  bool transparency = 4;
+  uint32 width = 5;
+  uint32 height = 6;
+  uint32 focus_request = 7;
+  bool focus_last = 8;
+}
+
+service PreviewService {
+  // Resolves when the preview closes, so the caller can restore keyboard focus.
+  rpc Open(OpenIconPreviewRequest) returns (google.protobuf.Empty);
+  rpc Command(IconPreviewCommand) returns (IconPreviewState);
+  rpc Watch(google.protobuf.Empty) returns (stream IconPreviewState);
+}
