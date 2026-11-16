@@ -9,17 +9,19 @@
     "author": "",
     "copyright": "© 2026 TeamDev. All rights reserved.",
     "description": "Generate beautiful macOS app icons in the *.icns format using AI.",
-    "locales": ["en-US"],
+    "locales": [
+      "en-US"
+    ],
     "trustedOrigins": [],
     "bundle": {
       "macOS": {
         "icon": "assets/app.icns",
         "bundleID": "com.teamdev.MoIcons",
-        "codesignIdentity": "${MAC_CODESIGN_IDENTITY}",
+        "codesignIdentity": "${MACOS_CODESIGN_IDENTITY}",
         "codesignEntitlements": "assets/entitlements.plist",
-        "teamID": "${MAC_TEAM_ID}",
-        "appleID": "${MAC_APPLE_ID}",
-        "password": "${MAC_APPLE_PASSWORD}",
+        "teamID": "${MACOS_TEAM_ID}",
+        "appleID": "${MACOS_APPLE_ID}",
+        "password": "${MACOS_APPLE_PASSWORD}",
         "installer": {
           "dmg": {
             "name": "",
