@@ -175,15 +175,27 @@ try {
       state.pathWrites = [];
       state.statusReads = 0;
       state.connectionWrites = 0;
+      state.loginStarts = 0;
+      state.loginMode = "delay";
+      state.loginState = null;
+      state.accountEmail = "test@example.com";
+      state.readyChanges = [];
       state.settings = { ...state.settings, provider: "codex", ready: false, codex: { state: "not_installed", email: "", error: "" } };
-      ipc.app.CancelCodexLogin = async () => ({});
+      ipc.app.StartCodexLogin = async () => {
+        state.loginStarts++;
+        if (state.loginMode === "delay") await new Promise((resolve) => { state.resolveLoginStart = resolve; });
+        if (state.loginMode === "error") return { state: "error", email: "", error: "Could not start sign-in. Try again." };
+        state.loginState = { state: "waiting", email: "", error: "" };
+        return state.loginState;
+      };
+      ipc.app.CancelCodexLogin = async () => { state.loginState = null; return {}; };
       ipc.app.GetCodexStatus = async () => {
         state.statusReads++;
-        return { state: state.savedPath ? "ready" : "not_installed", email: state.savedPath ? "test@example.com" : "", error: "" };
+        return state.loginState || { state: state.savedPath ? "ready" : "not_installed", email: state.savedPath ? state.accountEmail : "", error: "" };
       };
       ipc.app.SetGenerationConnection = async ({ connection }) => {
         state.connectionWrites++;
-        state.settings = { ...state.settings, ready: connection === "codex", codex: { state: "ready", email: "test@example.com", error: "" } };
+        state.settings = { ...state.settings, ready: connection === "codex", codex: { state: "ready", email: state.accountEmail, error: "" } };
         return state.settings;
       };
       state.pickMode = "cancel";
@@ -201,7 +213,7 @@ try {
         state.savedPath = appPath;
         return { appPath, error: "" };
       };
-      state.root.render(React.createElement(GenerationSettings, { key: "codex", disabled: false, connectionRequest: 0, onReadyChange: () => {} }));
+      state.root.render(React.createElement(GenerationSettings, { key: "codex", disabled: false, connectionRequest: 0, onReadyChange: (ready) => { state.readyChanges.push(ready); } }));
     };
   });
   await wait(() => !!document.querySelector('#settings-test button:not(:disabled)'));
@@ -402,6 +414,45 @@ try {
   assert.equal(await evaluate(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent), customPath);
   await screenshot("chatgpt-app-selected");
   check("selected app is validated, connects, and remains visible after reopening settings");
+
+  const connectionsBeforeLogin = await evaluate(() => window.__settingsTest.connectionWrites);
+  await click("Sign in again");
+  assert.equal(await evaluate(() => window.__settingsTest.loginStarts), 1);
+  assert.ok(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].every((button) => button.disabled)));
+  await evaluate(() => window.__settingsTest.resolveLoginStart());
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Finish signing in"));
+  assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), false);
+  assert.equal(await evaluate(() => [...document.querySelectorAll("dialog[open] button")].some((button) => button.textContent.trim() === "Sign in again")), false);
+  await screenshot("chatgpt-signing-in-again");
+  await click("Cancel sign-in");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Connected to MōIcons"));
+  assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), true);
+  assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), connectionsBeforeLogin);
+  check("a connected account can sign in again; pending login blocks duplicate actions and cancellation keeps the connection");
+
+  await evaluate(() => { window.__settingsTest.loginMode = "error"; });
+  await click("Sign in again");
+  await wait(() => document.querySelector("dialog[open] [role=alert]")?.textContent.includes("Could not start sign-in"));
+  await click("Try again");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Connected to MōIcons"));
+  assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), connectionsBeforeLogin);
+  check("failed reauthentication stays recoverable without disconnecting the saved account");
+
+  await evaluate(() => { window.__settingsTest.loginMode = "success"; });
+  await click("Sign in again");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Finish signing in"));
+  await evaluate(() => { window.__settingsTest.accountEmail = "renewed@example.com"; window.__settingsTest.loginState = null; });
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("renewed@example.com"));
+  assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), false);
+  assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), connectionsBeforeLogin);
+  await click("Use this account");
+  await wait(() => !document.querySelector("dialog[open]"));
+  await click("Generation settings");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Connected to MōIcons"));
+  assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), true);
+  assert.equal(await evaluate(() => window.__settingsTest.settings.codex.email), "renewed@example.com");
+  assert.equal(await evaluate(() => window.__settingsTest.loginStarts), 3);
+  check("reauthentication polls for completion and requires confirmation before connecting a different account");
 
   await evaluate(() => { const state = window.__settingsTest; state.pathMode = "invalid"; state.pickedPath = "/Applications/Other.app"; });
   await click("Change…");
