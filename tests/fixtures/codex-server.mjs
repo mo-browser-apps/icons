@@ -50,6 +50,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     if (scenario === "crash") { process.exit(1); }
     if (scenario === "wait") { reply({ turn: { id: turnId } }); return; }
     const complete = () => {
+      if (scenario.startsWith("turn-") || scenario === "retry-then-success") {
+        const error = scenario === "turn-outdated" ? {
+          message: JSON.stringify({ type: "error", status: 400, error: { type: "invalid_request_error",
+            message: "The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again." } }),
+          codexErrorInfo: "other",
+        } : { message: "private server detail", codexErrorInfo: {
+          "turn-limit": "usageLimitExceeded", "turn-rate-limit": "rateLimitExceeded",
+          "turn-unauthorized": "unauthorized", "turn-model": "modelNotFound",
+        }[scenario] || "other" };
+        if (scenario !== "turn-error-only" && scenario !== "turn-failed-empty") {
+          event("error", { threadId, turnId, error, willRetry: scenario === "retry-then-success" });
+        }
+        if (scenario !== "retry-then-success") {
+          event("turn/completed", { threadId, turn: { id: turnId, status: scenario === "turn-interrupted" ? "interrupted" : "failed",
+            error: ["turn-notification-only", "turn-failed-empty"].includes(scenario) ? null : error } });
+          reply({ turn: { id: turnId } });
+          return;
+        }
+      }
       if (scenario !== "empty") {
         const limited = scenario === "limit" || (scenario === "partial" && threads === 2);
         event("item/completed", { threadId, item: { id: "image", type: "imageGeneration", status: limited ? "failed" : "completed",

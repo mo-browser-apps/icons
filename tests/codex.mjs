@@ -138,11 +138,42 @@ test("API-key Codex sessions cannot silently spend API credits", async (t) => {
 });
 
 test("limits, missing images and malformed output never repeat a generation", async (t) => {
-  for (const [scenario, message] of [["limit", /limit has been reached/], ["empty", /did not generate/], ["invalid", /usable image/]]) {
+  for (const [scenario, message] of [["limit", /limit has been reached/], ["empty", /without returning an image/], ["invalid", /usable image/]]) {
     const f = await fixture(t, scenario);
     await assert.rejects(f.provider.generate(request), message);
     assert.equal((await f.events()).filter((e) => e.method === "turn/start").length, 1);
   }
+});
+
+test("turn failures report their cause instead of blaming image access or the description", async (t) => {
+  for (const [scenario, message] of [
+    ["turn-outdated", /ChatGPT copy.*too old/],
+    ["turn-limit", /usage limit has been reached/],
+    ["turn-rate-limit", /usage limit has been reached/],
+    ["turn-unauthorized", /sign-in has expired/],
+    ["turn-model", /model is not available/],
+    ["turn-error-only", /request failed/],
+    ["turn-notification-only", /request failed/],
+    ["turn-failed-empty", /request failed/],
+    ["turn-interrupted", /Generation stopped/],
+  ]) {
+    const f = await fixture(t, scenario);
+    await assert.rejects(f.provider.generate(request), error => {
+      assert.match(error.message, message);
+      assert.ok(!error.message.includes("private server detail"));
+      assert.ok(!error.message.includes("different description"));
+      return true;
+    });
+    const events = await f.events();
+    assert.equal(events.filter(e => e.method === "turn/start").length, 1);
+    await assert.rejects(stat(events[0].cwd), { code: "ENOENT" });
+  }
+});
+
+test("a recovered server error does not discard a successfully generated image", async (t) => {
+  const f = await fixture(t, "retry-then-success");
+  assert.equal((await f.provider.generate({ ...request, count: 1 })).images[0], png);
+  assert.equal((await f.events()).filter(e => e.method === "turn/start").length, 1);
 });
 
 test("a later usage limit preserves already generated artwork", async (t) => {

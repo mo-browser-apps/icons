@@ -86,6 +86,16 @@ test("discovers the packaged CLI in running, registered, and standard app locati
   }
 });
 
+test("selects the current running ChatGPT app ahead of an older mounted installer", async () => {
+  const app = "/Applications/ChatGPT.app";
+  const installer = "/Volumes/ChatGPT Installer/ChatGPT.app";
+  const f = subject({ running: [app], registered: [installer, app], files: {
+    [packaged(app)]: "file", [bundled(installer)]: "file",
+  } });
+  assert.equal(await f.findCodex(), packaged(app));
+  assert.deepEqual([...await f.findCodexCandidates()], [packaged(app), bundled(installer)]);
+});
+
 test("tries both layouts of the preferred app before other installations", async () => {
   const app = "/Volumes/AI apps/ChatGPT.app";
   const f = subject({ running: [app], registered: [app, "/Applications/ChatGPT.app"], files: {
