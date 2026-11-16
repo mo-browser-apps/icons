@@ -1,4 +1,5 @@
 import { IconFace } from "@/components/icon-face"
+import { IconPreviewButton } from "@/components/icon-preview-button"
 import { ICON_BODY_SIZE, ICON_SIZE, MACOS_ICON_PATH } from "@/lib/icon-geometry"
 
 export function VariantPicker({
@@ -24,8 +25,8 @@ export function VariantPicker({
         const isSelected = selected === i
         const src = variants[i]
         return (
+          <div key={i} className="relative">
           <button
-            key={i}
             onClick={() => onSelect(i)}
             disabled={!src}
             aria-label={`Variant ${i + 1}`}
@@ -66,6 +67,8 @@ export function VariantPicker({
               </svg>
             )}
           </button>
+          {src && <IconPreviewButton src={src} title={`Variant ${i + 1}`} label={`Preview variant ${i + 1}`} className="variant-preview" />}
+          </div>
         )
       })}
     </div>

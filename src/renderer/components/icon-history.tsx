@@ -3,6 +3,7 @@ import { ArrowLeft, Download, FolderOpen, History, X } from "lucide-react"
 import { ipc } from "@/gen/ipc"
 import type { GetIconHistoryResponse, IconHistoryEntry } from "@/gen/app"
 import { HistoryActions, type HistoryAction } from "./history-actions"
+import { IconPreviewButton } from "./icon-preview-button"
 import "./icon-history.css"
 
 function dayLabel(value: string) {
@@ -127,7 +128,10 @@ export function IconHistory({ onClose, onContinue, onSave, onRemoved, revision }
       {!loading && !entries.length && !error && <div className="history-empty"><History size={30} strokeWidth={1.5} /><h2>Your next idea starts here</h2><p>Generate an icon and all its variants will appear here automatically.</p><button className="history-button history-primary" onClick={onClose}>Create an icon</button></div>}
       {active && detail ? <div className="history-detail">
         <div className="history-detail-preview"><HistoryActions entry={active} onAction={action} busy={busy}>
-          <img src={detail.preparedPng} alt={`Variant ${active.variantIndex + 1}`} className="history-large-icon" />
+          <IconPreviewButton src={detail.preparedPng} title={`Variant ${active.variantIndex + 1}`} label="Preview history icon">
+            <img src={detail.preparedPng} alt={`Variant ${active.variantIndex + 1}`} className="history-large-icon" draggable={false} />
+            <span>Preview</span>
+          </IconPreviewButton>
         </HistoryActions></div>
         <div className="history-variant-tabs" aria-label="Variants from this generation">
           {entries.filter(entry => entry.generationId === active.generationId).map(entry => <button key={entry.id}

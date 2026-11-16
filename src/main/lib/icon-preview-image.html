@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'; connect-src 'self'">
+  <title>Icon preview image</title>
+  <style>
+    html, body { margin:0; width:100%; height:100%; background:#121212; color:#eee; }
+    body { overflow:hidden; font:14px system-ui,sans-serif; }
+    #viewport { width:100%; height:100%; overflow:auto; overflow-anchor:none; overscroll-behavior:none; scrollbar-width:thin; scrollbar-color:#68686c #181818; outline-offset:-3px; }
+    #canvas { min-width:100%; min-height:100%; width:max-content; height:max-content; display:grid; place-items:center; }
+    /* Room on every side lets a pinch stay anchored even while the icon fits. */
+    #viewport:not(.fitted) #canvas { min-width:0; min-height:0; padding:100vh 100vw; }
+    img { display:block; max-width:none; user-select:none; -webkit-user-drag:none; }
+    .checker { background-color:#181818; background-image:conic-gradient(#252525 25%,transparent 0 50%,#252525 0 75%,transparent 0); background-size:20px 20px; }
+    #error { position:fixed; inset:0; display:grid; place-items:center; padding:24px; text-align:center; }
+    #error[hidden] { display:none; }
+  </style>
+</head>
+<body>
+  <div id="viewport" class="fitted" tabindex="0" role="region" aria-label="Icon preview. Pinch to zoom, scroll or drag to pan. Tab returns to preview controls.">
+    <div id="canvas"><img id="icon" src="image.png" alt="Generated icon at full resolution" draggable="false"></div>
+  </div>
+  <p id="error" role="alert" hidden>The icon couldn’t be loaded. Close this preview and try again.</p>
+  <script>
+    const viewport = document.getElementById('viewport');
+    const icon = document.getElementById('icon');
+    let state = { factor:1, fit:true, transparency:false }, pendingAnchor = null, gesture = null, drag = null;
+    let desiredZoom = null, sending = false, targetZoom = 1, zoomRevision = 0;
+    let center = {x:.5,y:.5};
+    let measuredWidth=viewport.clientWidth, measuredHeight=viewport.clientHeight, measuredDpr=devicePixelRatio;
+    // Custom protocol resources support XMLHttpRequest in the bundled runtime;
+    // Fetch does not currently accept app-defined schemes.
+    const request = path => new Promise((resolve,reject) => {
+      const xhr=new XMLHttpRequest();
+      xhr.open('GET',path);xhr.timeout=5000;
+      xhr.onload=()=>{try {if(xhr.status!==200)throw new Error('Preview closed');resolve(JSON.parse(xhr.responseText));}catch(error){reject(error);}};
+      xhr.onerror=xhr.ontimeout=()=>reject(new Error('Preview unavailable'));
+      xhr.send();
+    });
+    const readState = () => request('state?t='+Date.now());
+    const command = (action, factor = 1) => request('command?'+new URLSearchParams({action,factor,t:Date.now()}));
+    function apply(next) {
+      if (!next.width) return;
+      // A toolbar/menu zoom uses the viewport center. Gesture responses keep
+      // their pointer anchor until native zoom has also finished laying out.
+      if(next.fit || (!sending && Math.abs(next.factor-targetZoom)>.001)){pendingAnchor=null;gesture=null;}
+      state = next;
+      viewport.classList.toggle('checker',state.transparency);
+      viewport.classList.toggle('fitted',state.fit);
+      if(!sending)targetZoom=state.factor;
+      positionImage();
+      requestAnimationFrame(positionImage);
+    }
+    function positionImage() {
+      const r=icon.getBoundingClientRect();
+      if(!r.width || !r.height)return;
+      if(state.fit) {viewport.scrollLeft=0;viewport.scrollTop=0;}
+      else {
+        const point=pendingAnchor || center;
+        // client coordinates change with page zoom; physical pixels don't.
+        // Use the rendered DPR, not the asynchronously reported zoom factor.
+        const x=pendingAnchor ? point.screenX/devicePixelRatio : viewport.clientWidth/2;
+        const y=pendingAnchor ? point.screenY/devicePixelRatio : viewport.clientHeight/2;
+        viewport.scrollLeft+=r.left+point.x*r.width-x;
+        viewport.scrollTop+=r.top+point.y*r.height-y;
+      }
+      measuredWidth=viewport.clientWidth;measuredHeight=viewport.clientHeight;measuredDpr=devicePixelRatio;
+      rememberCenter();
+      if(!drag)viewport.style.cursor=state.fit?'default':'grab';
+    }
+    function rememberCenter() {
+      if(state.fit){center={x:.5,y:.5};return;}
+      if(measuredWidth!==viewport.clientWidth || measuredHeight!==viewport.clientHeight || measuredDpr!==devicePixelRatio)return;
+      const r=icon.getBoundingClientRect();
+      if(r.width && r.height)center={x:(viewport.clientWidth/2-r.left)/r.width,y:(viewport.clientHeight/2-r.top)/r.height};
+    }
+    viewport.addEventListener('scroll',rememberCenter);
+    // Zoom IPC can finish before Chromium applies its new layout. Reposition
+    // again at layout time, before paint, without consuming the anchor early.
+    function finishZoom() {
+      // Release the gesture only once its reported scale is actually rendered,
+      // so later toolbar zooms can use the center without retaining the pointer.
+      if(!sending && pendingAnchor && Math.abs(devicePixelRatio-pendingAnchor.displayDpr*state.factor)<.001)pendingAnchor=null;
+    }
+    const resizeObserver=new ResizeObserver(()=>{positionImage();finishZoom();});
+    resizeObserver.observe(viewport);
+    function anchor(event) {
+      const r=icon.getBoundingClientRect();
+      const previous=gesture && performance.now()-gesture.time<250 ? gesture : null;
+      if(previous && previous.screenX===event.screenX && previous.screenY===event.screenY) {
+        // Mouse client coordinates are rounded after each page zoom. Keep the
+        // original image point for a stationary pointer throughout the gesture.
+        pendingAnchor={...previous.anchor};
+      } else {
+        const displayDpr=previous?.anchor.displayDpr ?? pendingAnchor?.displayDpr ?? devicePixelRatio/state.factor;
+        const screenX=previous ? previous.anchor.screenX+(event.screenX-previous.screenX)*displayDpr : event.clientX*devicePixelRatio;
+        const screenY=previous ? previous.anchor.screenY+(event.screenY-previous.screenY)*displayDpr : event.clientY*devicePixelRatio;
+        pendingAnchor={x:(screenX/devicePixelRatio-r.left)/r.width,y:(screenY/devicePixelRatio-r.top)/r.height,screenX,screenY,displayDpr};
+      }
+      gesture={anchor:pendingAnchor,screenX:event.screenX,screenY:event.screenY,time:performance.now()};
+    }
+    async function flushZoom() {
+      if(sending)return;
+      sending=true;
+      try { while(desiredZoom!==null) {const next=desiredZoom;desiredZoom=null;apply(await command('zoom',next));} }
+      catch { document.getElementById('error').hidden=false; }
+      finally {sending=false;positionImage();finishZoom();}
+    }
+    viewport.addEventListener('wheel',event=>{
+      // Chromium translates a trackpad pinch to a Ctrl+wheel event. Prevent its
+      // separate visual-viewport zoom; use the same browser Zoom API as buttons.
+      if(!event.ctrlKey && !event.metaKey){pendingAnchor=null;gesture=null;return;}
+      event.preventDefault();
+      positionImage();
+      anchor(event);
+      state.fit=false;viewport.classList.remove('fitted');positionImage();
+      zoomRevision++;
+      const delta=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?viewport.clientHeight:1);
+      targetZoom=Math.min(4,Math.max(.25,targetZoom*Math.exp(-delta*.01)));
+      desiredZoom=targetZoom;
+      void flushZoom();
+    },{passive:false});
+    viewport.addEventListener('pointerdown',event=>{
+      if(event.button!==0)return;
+      pendingAnchor=null;gesture=null;
+      viewport.focus(); viewport.setPointerCapture(event.pointerId);
+      drag={x:event.clientX,y:event.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};
+      viewport.style.cursor='grabbing';
+    });
+    viewport.addEventListener('pointermove',event=>{
+      if(!drag)return;
+      viewport.scrollLeft=drag.left+drag.x-event.clientX;viewport.scrollTop=drag.top+drag.y-event.clientY;
+    });
+    const release=()=>{drag=null;viewport.style.cursor='grab';};
+    viewport.addEventListener('pointerup',release);viewport.addEventListener('pointercancel',release);
+    // BrowserView.focus() restores DOM focus, so give it a scrollable keyboard
+    // target even before the user has clicked or dragged the image.
+    viewport.focus({preventScroll:true});
+    window.addEventListener('focus',()=>{if(document.activeElement===document.body)viewport.focus({preventScroll:true});});
+    document.addEventListener('keydown',event=>{
+      let action=null;
+      if(event.key==='Escape')action='close';
+      else if(event.key==='Tab')action=event.shiftKey?'toolbar-back':'toolbar';
+      else if(event.key==='+'||event.key==='=')action='in';
+      else if(event.key==='-')action='out';
+      else if(event.key==='0' && (event.metaKey||event.ctrlKey))action='actual';
+      else if(event.key==='9' && (event.metaKey||event.ctrlKey))action='fit';
+      if(action){event.preventDefault();void command(action).then(apply);}
+    });
+    icon.onerror=()=>{document.getElementById('error').hidden=false;};
+    const ready=()=>command('ready').then(apply);
+    if(icon.complete && icon.naturalWidth)void ready();else icon.addEventListener('load',ready,{once:true});
+    // The image origin is isolated from app IPC. Poll only this tiny state;
+    // zoom rendering remains in Chromium, and no artwork is transferred here.
+    const timer=setInterval(()=>{
+      const revision=zoomRevision;
+      if(!sending)void readState().then(next=>{if(!sending && revision===zoomRevision)apply(next);}).catch(()=>{});
+    },100);
+    window.addEventListener('pagehide',()=>{clearInterval(timer);resizeObserver.disconnect();},{once:true});
+  </script>
+</body>
+</html>

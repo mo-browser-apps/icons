@@ -96,6 +96,43 @@ Release builds read it from the `SENTRY_DSN` GitHub Actions secret.
 6. When satisfied, click **Save**. Choose a **`.icns`** path; the app writes **`YourName.icns`** and **`YourName.iconset`** in that folder (replacing existing files only if you confirm).
 7. Use **Reveal in Finder** from the success UI if you want to open the save location.
 
+## Inspect an icon
+
+Each generated variant has a **Preview** button beneath it. Clicking the artwork
+still selects the variant; Preview opens a separate, resizable viewer without
+changing that selection. In refinement, click the single icon. History offers
+the same viewer from an icon's details.
+
+The viewer starts at **Fit**. Use **− / +**, **100%**, or **Fit**, pinch on a
+trackpad, or hold Command/Ctrl while scrolling to zoom around the pointer.
+Ordinary scrolling,
+arrow keys, and dragging pan an enlarged image. **Transparency** shows a
+checkerboard behind the image. Escape or Close returns focus to the opener,
+preserving the prompt, selected variant, and refinement state.
+
+Keyboard shortcuts are Command/Ctrl +/−, Command/Ctrl 0 for 100%, and
+Command/Ctrl 9 for Fit. Tab moves between the controls and the image. Zoom ranges
+from 25% to 400%; 100% uses the browser's normal scale (one image pixel per CSS
+pixel), so Retina screen pixels are handled by the browser. Preview uses the
+full prepared PNG, including transparency, margins, and shadow; it never changes
+the export or enlarges a History thumbnail.
+
+The viewer uses MōBrowser's `BaseWindow`, `BrowserView`, and `browser.zoom` APIs.
+Artwork has a separate app-owned origin because Chromium shares zoom by host;
+the toolbar stays at its normal size. No Quick Look or platform-specific viewer
+is used. The image view uses private custom-protocol resource requests; the
+bundled runtime currently supports these through XMLHttpRequest, but not Fetch
+or request bodies. Other application actions remain on the generated IPC API.
+
+With `npm run dev -- --automation` running, verify the complete preview workflow
+with `node tests/icon-preview-ui.mjs`. It uses fixture generation without paid
+API calls or History writes, and saves screenshots in `.mobrowser/zoom-review/`.
+The wheel/trackpad input check uses this app's existing debugging endpoint at
+port 9222 (`MOICONS_CDP_URL` overrides it).
+With an icon preview open, `node tests/icon-preview-zoom.mjs` checks pointer
+anchoring from Fit, below Fit, and during rapid pinches after panning. It uses
+the same debugging endpoint without changing the editor or History.
+
 ## Project layout
 
 - **`src/main/`** — window, IPC, prompt building, provider selection, **`icns`** assembly.
