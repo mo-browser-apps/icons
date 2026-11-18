@@ -54,7 +54,8 @@ jobs:
     runs-on: ${{ matrix.target == 'windows' && 'windows-2022' || 'macos-15' }}
     timeout-minutes: 60
     permissions:
-      contents: read
+      # Creating the GitHub Release needs write access.
+      contents: write
       id-token: write
     defaults:
       run:
@@ -176,7 +177,34 @@ jobs:
           if ($unsigned) { throw "Unsigned files: $($unsigned.FullName -join ', ')" }
           node .mocontrol/release.mjs verified
       - name: Publish installer
+        id: publish
         run: node .mocontrol/release.mjs publish
+      # The bucket holds the release, so a failure here leaves it published.
+      - name: Attach installer to GitHub Release
+        if: steps.publish.outputs.installer
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          INSTALLER: ${{ steps.publish.outputs.installer }}
+          ASSET: ${{ steps.publish.outputs.filename }}
+        run: |
+          tag="v$RELEASE_VERSION"
+          # Checked first: creating a release on an existing tag ignores --target. `refs/tags/` also resolves annotated tags.
+          if at="$(gh api "repos/$GH_REPO/commits/refs/tags/$tag" --jq .sha 2> /dev/null)" && [ "$at" != "$RELEASE_SOURCE_COMMIT" ]; then
+            echo "::warning::Tag $tag is not at the released commit, so the installer was not attached to its GitHub Release."
+            exit 0
+          fi
+          # Another target's job may create the release first. Notes go through stdin: Git Bash rewrites an argument that starts with a slash.
+          # GitHub's generated notes follow them: a release without text shows the tagged commit's message.
+          gh release view "$tag" > /dev/null 2>&1 ||
+            gh release create "$tag" --target "$RELEASE_SOURCE_COMMIT" --title "$RELEASE_VERSION" --generate-notes --notes-file - <<< "$RELEASE_NOTES" ||
+            gh release view "$tag" > /dev/null
+          if [ -z "$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$ASSET\") | .name")" ]; then
+            cp "$INSTALLER" "$RUNNER_TEMP/$ASSET"
+            gh release upload "$tag" "$RUNNER_TEMP/$ASSET"
+          fi
       - name: Record failure
         if: failure()
         run: node .mocontrol/release.mjs failed

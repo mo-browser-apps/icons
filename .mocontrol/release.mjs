@@ -266,12 +266,17 @@ if (command === 'register') {
   }
   if (published?.state !== 'published') throw new Error('Publication is not confirmed');
   console.log('Installer published.');
+  // release.yml attaches this file to the GitHub Release under the published name.
+  if (env.GITHUB_OUTPUT)
+    await appendFile(env.GITHUB_OUTPUT, `installer=${file}\nfilename=${artifact.filename}\n`);
   await summary(`published \`${artifact.filename}\` (${(artifact.size / 1e6).toFixed(1)} MB).`);
 } else if (command === 'failed' || command === 'cancelled') {
   const { unreserved, failureStage = 'setup' } = await readStage();
   if (!unreserved) {
     const during = { setup: 'setup', build: 'the build', sign: 'signing', publish: 'publishing' };
-    await call('progress', { state: command, failureStage });
-    await summary(command === 'failed' ? `failed during ${during[failureStage]}.` : 'cancelled.');
+    const release = await call('progress', { state: command, failureStage });
+    // A run that ends after the installer is published doesn't change the release.
+    if (release?.state !== 'published')
+      await summary(command === 'failed' ? `failed during ${during[failureStage]}.` : 'cancelled.');
   }
 } else throw new Error('Unknown release command');
