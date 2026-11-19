@@ -6,9 +6,10 @@ import type { IconPreviewState } from '../gen/preview';
 import imageDocument from './icon-preview-image.html?raw';
 
 const TOOLBAR_HEIGHT = 84;
-const MIN_ZOOM = 0.25;
+const MIN_ZOOM = 0.01;
+const MIN_BROWSER_ZOOM = 0.25;
 const MAX_ZOOM = 4;
-const STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+const STEPS = [0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 
 /** A separate browser origin keeps Chromium's host-scoped zoom out of the editor. */
 export function registerIconPreview(owner: BrowserWindow) {
@@ -25,7 +26,9 @@ export function registerIconPreview(owner: BrowserWindow) {
   const setFactor = (factor: number) => {
     if (!active || !Number.isFinite(factor)) return;
     active.state.factor = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, factor));
-    active.image.browser.zoom.setFactor(active.state.factor);
+    // Chromium clamps page zoom at 25%. The image document supplies the
+    // remaining scale for larger references without changing their pixels.
+    active.image.browser.zoom.setFactor(Math.max(MIN_BROWSER_ZOOM, active.state.factor));
     publish();
   };
   const fit = () => {
@@ -128,6 +131,8 @@ export function registerIconPreview(owner: BrowserWindow) {
       toolbar.browser.zoom.setEnabled(false);
       image.browser.zoom.on('factorChanged', factor => {
         if (!active || active.window !== window) return;
+        // Our own native zoom notification must not replace a smaller image scale.
+        if (Math.abs(factor - Math.max(MIN_BROWSER_ZOOM, active.state.factor)) < 0.001) return;
         active.state.factor = factor;
         publish();
       });

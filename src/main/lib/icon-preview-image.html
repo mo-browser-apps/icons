@@ -27,6 +27,7 @@
     const viewport = document.getElementById('viewport');
     const icon = document.getElementById('icon');
     let state = { factor:1, fit:true, transparency:false }, pendingAnchor = null, gesture = null, drag = null;
+    const browserFactor = () => Math.max(.25,state.factor);
     let desiredZoom = null, sending = false, targetZoom = 1, zoomRevision = 0;
     let center = {x:.5,y:.5};
     let measuredWidth=viewport.clientWidth, measuredHeight=viewport.clientHeight, measuredDpr=devicePixelRatio;
@@ -54,6 +55,11 @@
       requestAnimationFrame(positionImage);
     }
     function positionImage() {
+      // Below Chromium's 25% page-zoom floor, scale only the displayed image.
+      // Its original pixels remain available when zooming back to actual size.
+      const imageScale=Math.min(1,state.factor/.25);
+      icon.style.width=imageScale<1 ? `${state.width*imageScale}px` : '';
+      icon.style.height=imageScale<1 ? `${state.height*imageScale}px` : '';
       const r=icon.getBoundingClientRect();
       if(!r.width || !r.height)return;
       if(state.fit) {viewport.scrollLeft=0;viewport.scrollTop=0;}
@@ -82,7 +88,7 @@
     function finishZoom() {
       // Release the gesture only once its reported scale is actually rendered,
       // so later toolbar zooms can use the center without retaining the pointer.
-      if(!sending && pendingAnchor && Math.abs(devicePixelRatio-pendingAnchor.displayDpr*state.factor)<.001)pendingAnchor=null;
+      if(!sending && pendingAnchor && Math.abs(devicePixelRatio-pendingAnchor.displayDpr*browserFactor())<.001)pendingAnchor=null;
     }
     const resizeObserver=new ResizeObserver(()=>{positionImage();finishZoom();});
     resizeObserver.observe(viewport);
@@ -94,7 +100,7 @@
         // original image point for a stationary pointer throughout the gesture.
         pendingAnchor={...previous.anchor};
       } else {
-        const displayDpr=previous?.anchor.displayDpr ?? pendingAnchor?.displayDpr ?? devicePixelRatio/state.factor;
+        const displayDpr=previous?.anchor.displayDpr ?? pendingAnchor?.displayDpr ?? devicePixelRatio/browserFactor();
         const screenX=previous ? previous.anchor.screenX+(event.screenX-previous.screenX)*displayDpr : event.clientX*devicePixelRatio;
         const screenY=previous ? previous.anchor.screenY+(event.screenY-previous.screenY)*displayDpr : event.clientY*devicePixelRatio;
         pendingAnchor={x:(screenX/devicePixelRatio-r.left)/r.width,y:(screenY/devicePixelRatio-r.top)/r.height,screenX,screenY,displayDpr};
@@ -118,7 +124,7 @@
       state.fit=false;viewport.classList.remove('fitted');positionImage();
       zoomRevision++;
       const delta=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?viewport.clientHeight:1);
-      targetZoom=Math.min(4,Math.max(.25,targetZoom*Math.exp(-delta*.01)));
+      targetZoom=Math.min(4,Math.max(.01,targetZoom*Math.exp(-delta*.01)));
       desiredZoom=targetZoom;
       void flushZoom();
     },{passive:false});
