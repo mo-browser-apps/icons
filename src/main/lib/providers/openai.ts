@@ -29,7 +29,9 @@ export class OpenAIProvider implements ImageProvider {
     if (request.referenceImageB64) {
       const form = new FormData();
       for (const [key, value] of Object.entries(parameters)) form.append(key, String(value));
-      form.append("image", new Blob([Buffer.from(request.referenceImageB64, "base64")], { type: "image/png" }), "reference.png");
+      const references = [request.referenceImageB64, request.additionalReferenceImageB64].filter((image): image is string => !!image);
+      references.forEach((image, index) => form.append(references.length > 1 ? "image[]" : "image",
+        new Blob([Buffer.from(image, "base64")], { type: "image/png" }), index === 0 ? "current-icon.png" : "reference.png"));
       body = form;
     } else {
       headers["Content-Type"] = "application/json";

@@ -26,6 +26,7 @@ https://github.com/user-attachments/assets/1c87f99d-993f-408b-bd32-a1eb6552eada
 - **Up to three variants per run.** Compare images and choose your favorite. The ChatGPT connection generates variants in sequence and keeps completed artwork if a later variant fails.
 - **Optional reference image.** Attach, paste or drop one PNG, JPEG, WebP or GIF to steer the model (for example a sketch, logo, or earlier render). A new attachment replaces the current reference.
 - **Refine workflow.** After you confirm one variant, new generations use its original artwork as the reference. Export masks, margins and shadows are kept out of model edits so they do not accumulate.
+- **References during refinement.** Drop or paste one image into the editor to guide the next change to your current icon. Preview or remove it before generating. Both images and your instruction are sent together; regenerating keeps the same inputs. Selecting a result clears the reference for the next edit and continues the existing History chain. Models that cannot use an extra reference show an inline message with **Choose model**; your attachment and prompt stay in place. OpenRouter support is checked per provider and effort, while direct providers use documented model support. Unknown models require choosing a supported model.
 - **Keep your work.** Stopping or failing regeneration preserves the previous variants and selection. Stop cancels active requests and retries; requests already processed by the service may still count toward usage.
 - **Local icon history.** Completed generations automatically keep every usable variant and its prompt on this Mac. Open **History** to revisit a design, continue editing, or export it again. Right-click an icon to copy its prompt, reveal its last export in Finder, or remove its history copy. Removing history never deletes exported files. If keeping a generation fails, the artwork stays visible with a retry action and a warning before quitting.
 - **Preview.** Generated artwork is prepared as a 1024×1024 PNG with a macOS 15 contour, transparent margins, smooth edges and a soft outer shadow. The UI displays this finished PNG without adding another mask or shadow.
@@ -68,6 +69,13 @@ Run provider and connection tests without API calls:
 ```bash
 node --test tests/api-key-settings.mjs tests/image-models.mjs tests/gemini.mjs tests/generation-errors.mjs tests/openrouter.mjs tests/codex.mjs tests/codex-discovery.mjs tests/codex-location.mjs tests/codex-startup.mjs tests/image-requests.mjs
 ```
+
+Reference refinement checks: `node --test tests/refinement-references.mjs`.
+With `ICON_PROVIDER=mock npm run dev -- --automation` open, run
+`node tests/refinement-references-ui.mjs` to verify drop/paste, preview, model
+compatibility, cancellation, regeneration, and History parent links. It isolates
+provider replies, settings, and History writes and captures the real UI with
+fixture artwork in `tasks/evidence/refinement-references/`.
 
 For attachment, cancellation and refinement regressions, start
 `ICON_PROVIDER=mock npm run dev -- --automation`, then run

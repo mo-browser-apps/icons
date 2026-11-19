@@ -28,9 +28,12 @@ function savedDraft(settings: GetGenerationSettingsResponse) {
 const needsConnection = (settings: GetGenerationSettingsResponse) => !settings.ready
 type Step = "connection" | "codex" | "key" | "models" | "remove"
 
-export function GenerationSettings({ disabled, connectionRequest, onReadyChange }: {
+export function GenerationSettings({ disabled, connectionRequest, modelRequest = 0, requiresExtraReference = false, onSettingsChange, onReadyChange }: {
   disabled: boolean
   connectionRequest: number
+  modelRequest?: number
+  requiresExtraReference?: boolean
+  onSettingsChange?: () => void
   onReadyChange: (ready: boolean) => void
 }) {
   const [settings, setSettings] = useState<GetGenerationSettingsResponse | null>(null)
@@ -58,6 +61,8 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
   const keyInput = useRef<HTMLInputElement>(null)
   const modelInput = useRef<HTMLSelectElement>(null)
   const cancelRemoval = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => { if (settings) onSettingsChange?.() }, [settings, onSettingsChange])
 
   useEffect(() => {
     const version = ++requestVersion.current
@@ -298,6 +303,7 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
     }
     setOpen(true)
   }
+  useEffect(() => { if (modelRequest) show() }, [modelRequest]) // eslint-disable-line react-hooks/exhaustive-deps
   const refresh = async () => {
     const version = ++requestVersion.current
     setLoading(true)
@@ -522,10 +528,11 @@ export function GenerationSettings({ disabled, connectionRequest, onReadyChange 
                     className="w-full h-10 appearance-none rounded-lg border border-border bg-secondary pl-3 pr-10 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
                   >
                     {!selected && <option value={draft.model} disabled>{loading ? "Loading models…" : "Choose a model"}</option>}
-                    {settings?.models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+                    {settings?.models.map((model) => <option key={model.id} value={model.id}>{model.name}{requiresExtraReference && model.maxReferenceImages >= 2 ? " · Extra reference" : ""}</option>)}
                   </select>
                   <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 </div>
+                {requiresExtraReference && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Choose a model marked “Extra reference” to use both images. We’ll check its available settings before generating.</p>}
               </div>
               {settings?.provider === "gemini" && <p className="text-xs leading-relaxed text-muted-foreground">Square 1K images, billed through the Gemini API. Checking your key does not confirm available image quota.{draft.model === "gemini-3.1-flash-lite-image" && " Lite is best for quick drafts; choose Nano Banana 2.1 or Pro for repeated refinements."}</p>}
               {!!selected?.qualities.length && <fieldset disabled={loading || saving}>

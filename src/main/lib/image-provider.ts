@@ -15,6 +15,8 @@ export interface GenerationRequest {
   negativePrompt: string;
   /** Base64-encoded PNG, no data URL prefix.  Omit for text-to-image. */
   referenceImageB64?: string;
+  /** Optional guidance image; referenceImageB64 remains the artwork being edited. */
+  additionalReferenceImageB64?: string;
   /** Number of icon variants to generate. */
   count: number;
   signal?: AbortSignal;

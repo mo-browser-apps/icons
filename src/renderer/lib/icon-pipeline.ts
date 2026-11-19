@@ -46,7 +46,7 @@ export interface IconPipeline {
   historyRevision: number
   retryingHistory: boolean
   retryHistory: () => Promise<void>
-  generate: (prompt: string, referenceDataUrl?: string, parentId?: string) => void
+  generate: (prompt: string, referenceDataUrl?: string, parentId?: string, additionalReferenceDataUrl?: string) => void
   cancel: () => void
 }
 
@@ -106,7 +106,7 @@ export function useIconPipeline(): IconPipeline {
     void ipc.app.SetUnsavedIconState({ unsaved: false }).catch(() => {})
   }, [])
 
-  const generate = useCallback(async (prompt: string, referenceDataUrl?: string, parentId = "") => {
+  const generate = useCallback(async (prompt: string, referenceDataUrl?: string, parentId = "", additionalReferenceDataUrl?: string) => {
     if (pendingHistory.current) return
     const generation = ++generationRef.current
     const isCurrent = () => generation === generationRef.current
@@ -118,6 +118,7 @@ export function useIconPipeline(): IconPipeline {
     try {
       // Normalize the optional reference image to PNG before sending it.
       const referenceImage = referenceDataUrl ? await imageUrlToPngBase64(referenceDataUrl) : ""
+      const additionalReferenceImage = additionalReferenceDataUrl ? await imageUrlToPngBase64(additionalReferenceDataUrl) : ""
       if (!isCurrent()) return
 
       const requestId = crypto.randomUUID()
@@ -127,6 +128,7 @@ export function useIconPipeline(): IconPipeline {
         prompt,
         negativePrompt: "",
         referenceImage,
+        additionalReferenceImage,
         seed: 0,
       })
 

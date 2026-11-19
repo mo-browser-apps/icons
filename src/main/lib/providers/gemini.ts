@@ -47,6 +47,7 @@ export class GeminiImageProvider implements ImageProvider {
     ];
     if (request.referenceImageB64) {
       input.push({ type: "image", mime_type: "image/png", data: request.referenceImageB64 });
+      if (request.additionalReferenceImageB64) input.push({ type: "image", mime_type: "image/png", data: request.additionalReferenceImageB64 });
     }
     const images: string[] = [];
     const count = Math.min(3, Math.max(1, Math.trunc(request.count) || 1));

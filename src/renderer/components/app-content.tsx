@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Download, History } from "lucide-react"
 import { IconHistory } from "@/components/icon-history"
-import type { GetIconHistoryResponse } from "@/gen/app"
+import type { GetIconHistoryResponse, ReferenceSupportResponse } from "@/gen/app"
 import { MacOSIcon } from "@/components/macos-icon"
 import { PromptInput, type PrimaryAction } from "@/components/prompt-input"
 import { GenerationSettings } from "@/components/generation-settings"
@@ -37,10 +37,31 @@ export function AppContent() {
   const [savingExport, setSavingExport] = useState(false)
   const [connectionReady, setConnectionReady] = useState<boolean | null>(null)
   const [connectionRequest, setConnectionRequest] = useState(0)
+  const [modelRequest, setModelRequest] = useState(0)
+  const [settingsRevision, setSettingsRevision] = useState(0)
+  const [support, setSupport] = useState<(ReferenceSupportResponse & { revision: number }) | null>(null)
+  const settingsChanged = useCallback(() => setSettingsRevision(value => value + 1), [])
+  const refining = !!rawBaseIconSrc
+  const needsReferenceSupport = refining && !!attachment
+  const referenceSupport = needsReferenceSupport
+    ? support?.revision === settingsRevision ? support : { status: "checking", message: "Checking reference support…" }
+    : null
+  const referenceBlocked = !!referenceSupport && referenceSupport.status !== "supported"
   const resumeAfterCancelRef = useRef<ResumeAfterCancel>("idle")
   const unarchivedSelection = useRef<number | null>(null)
 
   const pipeline = useIconPipeline()
+
+  useEffect(() => {
+    if (!needsReferenceSupport) { setSupport(null); return }
+    let current = true
+    ipc.app.GetReferenceSupport({}).then(response => {
+      if (current) setSupport({ ...response, revision: settingsRevision })
+    }).catch(() => {
+      if (current) setSupport({ status: "error", message: "Couldn’t check reference support. Try again.", revision: settingsRevision })
+    })
+    return () => { current = false }
+  }, [needsReferenceSupport, settingsRevision])
 
   useEffect(() => {
     const selected = unarchivedSelection.current
@@ -67,7 +88,7 @@ export function AppContent() {
   }, [pipeline.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startGeneration = () => {
-    if (!prompt.trim() || iconState === "generating" || attachmentLoading || pipeline.historyError || savingExport) return
+    if (!prompt.trim() || iconState === "generating" || attachmentLoading || referenceBlocked || pipeline.historyError || savingExport) return
     if (!connectionReady) {
       setConnectionRequest((request) => request + 1)
       return
@@ -75,10 +96,10 @@ export function AppContent() {
     resumeAfterCancelRef.current =
       iconState === "refine" ? "refine" : iconState === "generated" ? "generated" : "idle"
     setIconState("generating")
-    // In refine mode the confirmed variant is the reference; otherwise use the
-    // user-attached image (if any).
-    const referenceImage = iconState === "refine" ? rawBaseIconSrc : attachment
-    pipeline.generate(prompt, referenceImage ?? undefined, iconState === "refine" && !removedIds.has(baseHistoryId) ? baseHistoryId : "")
+    // Retain the same base and reference when regenerating a refinement batch.
+    const referenceImage = rawBaseIconSrc ?? attachment
+    pipeline.generate(prompt, referenceImage ?? undefined, refining && !removedIds.has(baseHistoryId) ? baseHistoryId : "",
+      refining ? attachment ?? undefined : undefined)
   }
 
   const stopGeneration = () => {
@@ -150,8 +171,8 @@ export function AppContent() {
   }
 
   const inputPlaceholder =
-    iconState === "refine"
-      ? "Make changes to the icon or describe a new idea…"
+    refining
+      ? attachment ? "Use the reference’s colors and keep this icon’s shape…" : "Describe changes to your icon…"
       : "Describe your app icon…"
 
   const primaryAction: PrimaryAction =
@@ -258,10 +279,10 @@ export function AppContent() {
         onSave={id => saveIcon(id)} onRemoved={id => setRemovedIds(previous => new Set([...previous, id]))}
         revision={historyRevision + pipeline.historyRevision} />}
 
-      <div className="flex min-h-0 flex-1 flex-col" inert={historyOpen} style={{ visibility: historyOpen ? "hidden" : undefined }}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" inert={historyOpen} style={{ visibility: historyOpen ? "hidden" : undefined }}>
 
-      {/* Icon preview — pinned to top, centered horizontally. */}
-      <div className="flex justify-center pt-28 pb-20 px-10">
+      {/* Make room for the attachment and its compatibility feedback. */}
+      <div className={cn("flex flex-1 items-center justify-center px-10 pb-4", attachment ? "min-h-[184px] pt-6" : "min-h-[208px] pt-12")}>
         <MacOSIcon
           state={iconState}
           selected={selectedVariant}
@@ -272,17 +293,20 @@ export function AppContent() {
       </div>
 
       {/* Bottom area — input, pushed to the bottom. */}
-      <div className="flex flex-1 flex-col items-center justify-end gap-6 px-4 pb-4">
+      <div className="flex shrink-0 flex-col items-center justify-end gap-6 px-4 pb-4">
         <PromptInput
           value={prompt}
           onChange={setPrompt}
           primaryAction={primaryAction}
           onPrimary={onPrimary}
-          primaryEnabled={primaryEnabled && !attachmentLoading && pipeline.status !== "saving" && !savingExport && (!pipeline.historyError || primaryAction === "select")}
+          primaryEnabled={primaryEnabled && !attachmentLoading && (!referenceBlocked || primaryAction === "select" || primaryAction === "stop") && pipeline.status !== "saving" && !savingExport && (!pipeline.historyError || primaryAction === "select")}
           onRegenerate={primaryAction === "select" ? startGeneration : undefined}
-          regenerateEnabled={prompt.trim().length > 0 && !attachmentLoading && !pipeline.historyError && !savingExport}
-          inputDisabled={iconState === "generating"}
-          referenceLocked={iconState === "refine"}
+          regenerateEnabled={prompt.trim().length > 0 && !attachmentLoading && !referenceBlocked && !pipeline.historyError && !savingExport}
+          inputDisabled={iconState === "generating" || historyOpen}
+          refining={refining}
+          referenceSupport={referenceSupport}
+          onChooseModel={() => setModelRequest(value => value + 1)}
+          onRetrySupport={settingsChanged}
           placeholder={inputPlaceholder}
           attachment={attachment}
           onAttachmentChange={setAttachment}
@@ -290,6 +314,9 @@ export function AppContent() {
           settingsControl={<GenerationSettings
             disabled={iconState === "generating"}
             connectionRequest={connectionRequest}
+            modelRequest={modelRequest}
+            requiresExtraReference={needsReferenceSupport}
+            onSettingsChange={settingsChanged}
             onReadyChange={setConnectionReady}
           />}
         />

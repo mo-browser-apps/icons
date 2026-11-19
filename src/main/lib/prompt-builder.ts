@@ -47,10 +47,12 @@ export interface BuiltPrompt {
  * The caller provides the raw user intent (e.g. "clipboard manager icon") and
  * receives a fully-formed prompt pair ready to send to any image provider.
  */
-export function buildPrompt(userIntent: string): BuiltPrompt {
+export function buildPrompt(userIntent: string, additionalReference = false): BuiltPrompt {
   const intent = userIntent.trim();
   return {
-    positive: `${SYSTEM_PREFIX}, ${intent}`,
+    positive: additionalReference
+      ? `${SYSTEM_PREFIX}. Image 1 is the current icon to edit. Image 2 is an additional reference, not a replacement for the current icon. Apply the user's requested changes to image 1, using image 2 only as directed. Preserve the current icon's other details. User instruction: ${intent}`
+      : `${SYSTEM_PREFIX}, ${intent}`,
     negative: NEGATIVE_PROMPT,
   };
 }

@@ -88,6 +88,14 @@ message GenerateIconRequest {
   // Seed for reproducibility. 0 = pick automatically.
   int32 seed = 4;
   string request_id = 5;
+  // Optional additional reference while editing reference_image. Never replaces it.
+  string additional_reference_image = 6;
+}
+
+message ReferenceSupportResponse {
+  // supported, unsupported, unknown, or error. Applies to current icon + one reference.
+  string status = 1;
+  string message = 2;
 }
 
 message CancelGenerationRequest { string request_id = 1; }
@@ -168,6 +176,8 @@ message ImageModelOption {
   string id = 1;
   string name = 2;
   repeated string qualities = 3;
+  // Zero means unknown. OpenRouter values are catalog hints; check the endpoint too.
+  int32 max_reference_images = 4;
 }
 
 message GetGenerationSettingsRequest {
@@ -231,6 +241,7 @@ service AppService {
   rpc CancelCodexLogin(google.protobuf.Empty) returns (google.protobuf.Empty);
   rpc SetGenerationConnection(SetGenerationConnectionRequest) returns (GetGenerationSettingsResponse);
   rpc GetGenerationSettings(GetGenerationSettingsRequest) returns (GetGenerationSettingsResponse);
+  rpc GetReferenceSupport(google.protobuf.Empty) returns (ReferenceSupportResponse);
   rpc SetGenerationSettings(SetGenerationSettingsRequest) returns (SetGenerationSettingsResponse);
   rpc GetOpenAIApiKeyStatus(GetOpenAIApiKeyStatusRequest) returns (GetOpenAIApiKeyStatusResponse);
   rpc GetStoredOpenAIApiKey(GetStoredOpenAIApiKeyRequest) returns (GetStoredOpenAIApiKeyResponse);

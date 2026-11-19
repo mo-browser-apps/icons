@@ -4,6 +4,7 @@ export interface ImageModel {
   id: string;
   name: string;
   qualities: string[];
+  maxReferenceImages: number;
 }
 
 export interface ImageSettings {
@@ -30,7 +31,14 @@ export function geminiModel(resourceName: unknown): ImageModel | undefined {
   const id = resourceName.slice("models/".length);
   const name = GEMINI_IMAGE_MODELS.get(id);
   // Keep Google's default thinking settings. OpenAI quality values don't apply.
-  return name ? { id, name, qualities: [] } : undefined;
+  return name ? { id, name, qualities: [], maxReferenceImages: 14 } : undefined;
+}
+
+// The direct providers do not publish reference limits in their model catalogs.
+// Keep this limited to documented GPT Image families; future names stay unknown.
+// https://developers.openai.com/api/reference/resources/images/methods/edit
+export function openAIReferenceLimit(id: string): number {
+  return /^(?:gpt-image-(?:1(?:\.5|-mini)?|2|2\.[56]-(?:sunburst|flare))(?:-\d{4}-\d{2}-\d{2})?|chatgpt-image-latest)$/.test(id) ? 16 : 0;
 }
 
 interface Capability {
@@ -51,13 +59,13 @@ interface RouterModel {
 const values = (cap?: Capability): string[] =>
   cap?.type === "enum" && Array.isArray(cap.values) ? cap.values : [];
 
-function supportsIconWorkflow(parameters: Parameters): boolean {
+function supportsIconWorkflow(parameters: Parameters, referenceCount = 1): boolean {
   const references = parameters.input_references;
   const formats = parameters.output_format?.values;
   return values(parameters.aspect_ratio).includes("1:1") &&
     (!Array.isArray(formats) || formats.includes("png")) &&
     references?.type === "range" && references.min === 0 &&
-    (references.max ?? 0) >= 1;
+    (references.max ?? 0) >= referenceCount;
 }
 
 // OpenAI's Models API does not expose parameter capabilities. Keep the common
@@ -71,6 +79,7 @@ export function openAIModel(id: string): ImageModel | undefined {
       .replace(/-(flare|sunburst|mini)/g, (_, tier: string) => ` ${tier[0].toUpperCase()}${tier.slice(1)}`)
       .replace(/-(\d{4}-\d{2}-\d{2})$/, " ($1)"),
     qualities: [...OPENAI_QUALITIES],
+    maxReferenceImages: openAIReferenceLimit(id),
   };
 }
 
@@ -83,6 +92,7 @@ export function routerModel(model: RouterModel): ImageModel | undefined {
   return {
     id: model.id,
     name: model.name,
+    maxReferenceImages: parameters.input_references?.max ?? 0,
     // Keep OpenAI controls consistent whether used directly or via OpenRouter.
     qualities: model.id.startsWith("openai/")
       ? OPENAI_QUALITIES.filter((quality) => qualities.includes(quality))
@@ -206,7 +216,7 @@ async function getJSON<T>(url: string, apiKey?: string, signal?: AbortSignal): P
 let cached: { provider: ImageService; key: string; expires: number; models: ImageModel[] } | undefined;
 
 export async function listImageModels(provider: ImageService, apiKey: string, refresh = false): Promise<ImageModel[]> {
-  if (provider === "mock") return [{ id: "mock", name: "Local preview", qualities: [] }];
+  if (provider === "mock") return [{ id: "mock", name: "Local preview", qualities: [], maxReferenceImages: 2 }];
   if (!apiKey) throw new Error("Add an API key to load models.");
   if (!refresh && cached?.provider === provider && cached.key === apiKey && cached.expires > Date.now()) {
     return cached.models;
@@ -236,16 +246,26 @@ export async function listImageModels(provider: ImageService, apiKey: string, re
 }
 
 /** Confirm quality and reference support on the same endpoint. */
-export async function compatibleRouterProviders(settings: ImageSettings, signal?: AbortSignal): Promise<string[]> {
+export async function compatibleRouterProviders(settings: ImageSettings, signal?: AbortSignal, referenceCount = 1): Promise<string[]> {
   const id = settings.model.split("/").map(encodeURIComponent).join("/");
   const response = await getJSON<{ endpoints: Array<{ provider_tag?: string | null; supported_parameters: Parameters }> }>(
     `https://openrouter.ai/api/v1/images/models/${id}/endpoints`, undefined, signal
   );
   const compatible = response.endpoints.filter(({ supported_parameters: parameters }) =>
-    supportsIconWorkflow(parameters) &&
+    supportsIconWorkflow(parameters, referenceCount) &&
     (!settings.quality || values(parameters.quality).includes(settings.quality))
   );
-  if (!compatible.length) throw new Error("No provider supports this quality for generation and editing. Choose a different quality.");
+  if (!compatible.length) {
+    if (referenceCount > 1) throw new ProviderRequestError("This model can’t use an additional reference with the selected settings. Choose another model or remove the reference.", "reference_unsupported");
+    throw new Error("No provider supports this quality for generation and editing. Choose a different quality.");
+  }
+  if (referenceCount > 1 && compatible.some(endpoint => !endpoint.provider_tag) && compatible.length !== response.endpoints.length) {
+    // An untagged endpoint cannot be pinned. Never let a two-image edit route to
+    // an incompatible endpoint simply because one eligible endpoint lacks a tag.
+    const routable = compatible.filter(endpoint => endpoint.provider_tag);
+    if (!routable.length) throw new ProviderRequestError("This model’s available providers can’t guarantee support for an additional reference. Choose another model.", "reference_unsupported");
+    return routable.map(endpoint => endpoint.provider_tag!);
+  }
   // Some models have no provider-level routing. Otherwise pin eligible endpoints
   // so an unsupported option cannot be silently ignored by another provider.
   return compatible.some((endpoint) => !endpoint.provider_tag)
