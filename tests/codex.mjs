@@ -49,7 +49,8 @@ test("generation uses the catalog's Astra for Pro and Sol for other plans instea
 test("a saved model is revalidated, used for every variant, and scoped to its account and plan", async t => {
   const { prefs, values } = modelPrefs();
   const f = await fixture(t, "success", {}, prefs);
-  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com");
+  const { codexSelectionId } = await f.models.readCodexModelSettings("test@example.com");
+  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId);
   assert.equal((await f.models.readCodexModelSettings("test@example.com")).model, "gpt-6.2-astra");
   await f.provider.generate(request);
   assert.ok((await f.events()).filter(e => e.method === "thread/start").every(e => e.params.model === "gpt-6.2-astra"));
@@ -63,7 +64,8 @@ test("a saved model is revalidated, used for every variant, and scoped to its ac
 test("removed saved models use a listed default; hidden and text-only models never enter the selector", async t => {
   const { prefs } = modelPrefs();
   const f = await fixture(t, "success", {}, prefs);
-  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com");
+  const { codexSelectionId } = await f.models.readCodexModelSettings("test@example.com");
+  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId);
   const catalog = [
     { model: "gpt-6.2-astra", displayName: "Hidden", hidden: true },
     { model: "gpt-6.2-sol", displayName: "Text only", inputModalities: ["text"] },
@@ -90,18 +92,45 @@ test("empty or failed catalogs stop before any thread or generation starts", asy
 test("model saves reject stale accounts and missing models, and roll back persistence failures without generating", async t => {
   const { prefs, values } = modelPrefs();
   const f = await fixture(t, "success", {}, prefs);
-  await assert.rejects(f.models.saveCodexModel("unlisted", "test@example.com"), /no longer listed/);
-  await assert.rejects(f.models.saveCodexModel("gpt-6.2-sol", "previous@example.com"), /account changed/);
+  const { codexSelectionId } = await f.models.readCodexModelSettings("test@example.com");
+  await assert.rejects(f.models.saveCodexModel("unlisted", "test@example.com", codexSelectionId), /no longer listed/);
+  await assert.rejects(f.models.saveCodexModel("gpt-6.2-sol", "previous@example.com", codexSelectionId), /account changed/);
   assert.equal(values.size, 0);
   prefs.persist = () => false;
-  await assert.rejects(f.models.saveCodexModel("gpt-6.2-astra", "test@example.com"), /Could not save/);
+  await assert.rejects(f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId), /Could not save/);
   assert.equal(values.size, 0);
   prefs.persist = () => true;
-  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com");
+  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId);
   prefs.persist = () => false;
-  await assert.rejects(f.models.saveCodexModel("gpt-6.2-sol", "test@example.com"), /Could not save/);
+  await assert.rejects(f.models.saveCodexModel("gpt-6.2-sol", "test@example.com", codexSelectionId), /Could not save/);
   assert.equal((await f.models.readCodexModelSettings("test@example.com")).model, "gpt-6.2-astra");
   assert.ok(!(await f.events()).some(e => e.method === "turn/start"));
+});
+
+test("a stale plan or missing selection identity cannot overwrite another plan's model choice", async t => {
+  const { prefs, values } = modelPrefs();
+  const pro = await fixture(t, "success", { MOICONS_TEST_PLAN: "pro" }, prefs);
+  const plus = await fixture(t, "success", { MOICONS_TEST_PLAN: "plus" }, prefs);
+  const proSettings = await pro.models.readCodexModelSettings("test@example.com");
+  await pro.models.saveCodexModel("gpt-6.2-astra", "test@example.com", proSettings.codexSelectionId);
+  const plusSettings = await plus.models.readCodexModelSettings("test@example.com");
+  assert.equal(plusSettings.model, "gpt-6.2-sol");
+  assert.notEqual(proSettings.codexSelectionId, plusSettings.codexSelectionId);
+  assert.match(proSettings.codexSelectionId, /^[a-f0-9]{64}$/);
+  const before = [...values];
+  await assert.rejects(pro.models.saveCodexModel(plusSettings.model, "test@example.com", plusSettings.codexSelectionId), /account or plan changed/);
+  await assert.rejects(plus.models.saveCodexModel(proSettings.model, "test@example.com", proSettings.codexSelectionId), /account or plan changed/);
+  await assert.rejects(pro.models.saveCodexModel(plusSettings.model, "test@example.com", ""), /account or plan changed/);
+  assert.deepEqual([...values], before);
+  assert.equal((await pro.models.readCodexModelSettings("test@example.com")).model, "gpt-6.2-astra");
+  assert.ok(!(await pro.events()).some(e => e.method === "turn/start"));
+});
+
+test("ChatGPT model options advertise the existing two-reference generation path", async t => {
+  const f = await fixture(t);
+  const settings = await f.models.readCodexModelSettings("test@example.com");
+  assert.ok(settings.models.length > 0);
+  assert.ok(settings.models.every(model => model.maxReferenceImages === 2));
 });
 
 test("two-image refinement passes distinct ordered files and cleans them up", async t => {

@@ -10,20 +10,20 @@ import type { GetGenerationSettingsResponse } from "../gen/app";
 export async function readGenerationSettings(refresh = false): Promise<GetGenerationSettingsResponse> {
   if (isConnectionDisconnected()) {
     return { provider: "", model: "", quality: "", models: [], hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: false,
-      ready: false, codex: undefined, error: "", errorCode: "" };
+      ready: false, codex: undefined, codexSelectionId: "", error: "", errorCode: "" };
   }
   const provider = resolveProviderName();
   if (provider === "codex") {
     const codex = await getCodexStatus();
     const base = { provider, model: "", quality: "", models: [], hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: false,
-      ready: codex.state === "ready", codex, error: codex.error, errorCode: codex.state === "ready" ? "" : "codex_connection" };
+      ready: codex.state === "ready", codex, codexSelectionId: "", error: codex.error, errorCode: codex.state === "ready" ? "" : "codex_connection" };
     if (!base.ready) return base;
     try { return { ...base, ...await readCodexModelSettings(codex.email) }; }
     catch (error) {
       return { ...base, ready: false, error: error instanceof Error ? error.message : "Could not load ChatGPT models. Try again.", errorCode: "codex_models" };
     }
   }
-  const base = { provider, ...getImageSettings(provider), hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: provider !== "mock", codex: undefined };
+  const base = { provider, ...getImageSettings(provider), hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: provider !== "mock", codex: undefined, codexSelectionId: "" };
   if (base.apiKeyRequired && !base.hasApiKey) return { ...base, ready: false, models: [], error: "", errorCode: "" };
   try {
     const models = await listImageModels(provider, getResolvedApiKey(), refresh);

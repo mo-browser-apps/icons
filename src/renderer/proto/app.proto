@@ -195,6 +195,8 @@ message GetGenerationSettingsResponse {
   string error_code = 8;
   CodexStatus codex = 9;
   bool ready = 10;
+  // Opaque identity for the account-and-plan scope of the ChatGPT model choice.
+  string codex_selection_id = 11;
 }
 
 message SetGenerationSettingsRequest {
@@ -203,6 +205,8 @@ message SetGenerationSettingsRequest {
   string quality = 3;
   // Prevent saving a model to a different account if sign-in changes while editing.
   string expected_codex_email = 4;
+  // Reject a draft read under a different account or subscription plan.
+  string expected_codex_selection_id = 5;
 }
 
 message SetGenerationSettingsResponse {

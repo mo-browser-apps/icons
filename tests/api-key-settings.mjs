@@ -37,7 +37,7 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
   const connectionHandler = load(fileURLToPath(new URL("../src/main/lib/set-generation-connection.ts", import.meta.url)));
   const account = load(fileURLToPath(new URL("../src/main/lib/codex-account.ts", import.meta.url)));
   const codexModels = load(fileURLToPath(new URL("../src/main/lib/codex-models.ts", import.meta.url)));
-  codexModels.readCodexModelSettings = async () => ({ model: "gpt-6.2-sol", models: [{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol", qualities: [], maxReferenceImages: 0 }] });
+  codexModels.readCodexModelSettings = async () => ({ codexSelectionId: "test-account-plus", model: "gpt-6.2-sol", models: [{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol", qualities: [], maxReferenceImages: 2 }] });
   return {
     save: apiKeys.saveValidatedApiKey,
     remove: apiKeys.removeStoredApiKey,
@@ -64,6 +64,7 @@ test("OpenAI validates through the authenticated model list, then preserves a su
   assert.equal(result.model, saved.model);
   assert.equal(result.quality, saved.quality);
   assert.equal(result.hasApiKey, true);
+  assert.equal(result.codexSelectionId, "");
   assert.equal(app.values.get(keyPref), "sk-test");
   assert.equal(app.writes(), 1);
 });
@@ -80,6 +81,7 @@ test("a forced ChatGPT provider can confirm a newly signed-in account without pe
   assert.equal(confirmed.ready, true);
   assert.equal(confirmed.provider, "codex");
   assert.equal(confirmed.codex.email, "test@example.com");
+  assert.equal(confirmed.codexSelectionId, "test-account-plus");
   for (const connection of ["api", "none"]) await assert.rejects(app.setConnection(connection), /provider is fixed/);
   assert.equal(app.writes(), 0);
   assert.deepEqual(Object.fromEntries(app.values), initial);

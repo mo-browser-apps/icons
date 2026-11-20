@@ -167,6 +167,12 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       if (codexSelected && response.state === "ready" && response.email === settings?.codex?.email) {
         const latest = await ipc.app.GetGenerationSettings({ refresh: true })
         if (version !== requestVersion.current) return
+        // The desktop account can also change between the status and model reads.
+        if (latest.codex?.state === "ready" && latest.codex.email !== settings?.codex?.email) {
+          setCodex(latest.codex)
+          onReadyChange(false)
+          return
+        }
         setSettings(latest)
         setDraft(savedDraft(latest))
         setCodex(latest.codex ?? response)
@@ -330,10 +336,17 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
     try {
       const response = await ipc.app.GetGenerationSettings({ refresh: true })
       if (version !== requestVersion.current) return
+      if (response.provider === "codex" && response.codex?.state === "ready" && response.codex.email !== settings?.codex?.email) {
+        // Keep the confirmed account and its draft until Use this account is pressed.
+        setCodex(response.codex)
+        onReadyChange(false)
+        setStep("codex")
+        return
+      }
       setSettings(response)
       if (response.provider === "codex") setCodex(response.codex ?? null)
       setDraft((latest) => {
-        if (response.codex?.email !== settings?.codex?.email) return savedDraft(response)
+        if (response.codexSelectionId !== settings?.codexSelectionId) return savedDraft(response)
         const model = response.models.find((item) => item.id === latest.model)
         return model ? defaultsFor(model, latest.quality) : savedDraft(response)
       })
@@ -378,7 +391,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
     setError("")
     try {
       const response = await ipc.app.SetGenerationSettings({ provider: settings.provider, ...draft,
-        expectedCodexEmail: settings.codex?.email || "" })
+        expectedCodexEmail: settings.codex?.email || "", expectedCodexSelectionId: settings.codexSelectionId || "" })
       if (response.error) { setError(response.error); return }
       setSettings({ ...settings, ...draft, error: "", errorCode: "" })
       setOpen(false)

@@ -565,7 +565,7 @@ ipc.registerService(AppServiceDescriptor, {
     try {
       const provider = resolveProviderName();
       if (request.provider !== provider) throw new Error('Your provider changed. Reopen generation settings.');
-      if (provider === 'codex') await saveCodexModel(request.model, request.expectedCodexEmail);
+      if (provider === 'codex') await saveCodexModel(request.model, request.expectedCodexEmail, request.expectedCodexSelectionId);
       else await saveImageSettings(provider, getResolvedApiKey(), {
         model: request.model, quality: request.quality,
       });

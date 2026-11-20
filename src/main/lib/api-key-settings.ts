@@ -57,5 +57,5 @@ export async function saveValidatedApiKey(input: string, selectedProvider = "") 
     else prefs.remove(API_PROVIDER_PREFS_KEY);
     throw new Error("Could not save preferences. Your previous API key has been kept. Try again.");
   }
-  return { provider, ...settings, models, hasApiKey: true, apiKeyRequired: true, error: "", errorCode: "", ready: true, codex: undefined };
+  return { provider, ...settings, models, hasApiKey: true, apiKeyRequired: true, error: "", errorCode: "", ready: true, codex: undefined, codexSelectionId: "" };
 }

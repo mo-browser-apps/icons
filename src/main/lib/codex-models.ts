@@ -14,11 +14,16 @@ export interface CodexModel {
   supportedReasoningEfforts: { reasoningEffort: string }[];
 }
 
-function preferenceKey(account: Account): string | undefined {
+function selectionIdentity(account: Account): string | undefined {
   // Keep choices separate when accounts or plans change, without storing emails.
   if (!account.email) return undefined;
   const identity = JSON.stringify([account.email.trim().toLowerCase(), account.planType || "unknown"]);
-  return `imageGeneration.codex.model.${createHash("sha256").update(identity).digest("hex")}`;
+  return createHash("sha256").update(identity).digest("hex");
+}
+
+function preferenceKey(account: Account): string | undefined {
+  const identity = selectionIdentity(account);
+  return identity ? `imageGeneration.codex.model.${identity}` : undefined;
 }
 
 export async function listCodexModels(client: CodexClient): Promise<CodexModel[]> {
@@ -73,13 +78,17 @@ async function withAccountModels<T>(email: string, read: (models: CodexModel[], 
 
 export async function readCodexModelSettings(email: string) {
   return withAccountModels(email, (models, account) => ({
+    codexSelectionId: selectionIdentity(account) || "",
     model: selectCodexModel(models, account).model,
-    models: models.map((model) => ({ id: model.model, name: model.displayName || model.model, qualities: [], maxReferenceImages: 0 })),
+    models: models.map((model) => ({ id: model.model, name: model.displayName || model.model, qualities: [], maxReferenceImages: 2 })),
   }));
 }
 
-export async function saveCodexModel(model: string, email: string): Promise<void> {
+export async function saveCodexModel(model: string, email: string, expectedSelectionId: string): Promise<void> {
   await withAccountModels(email, (models, account) => {
+    if (!expectedSelectionId || expectedSelectionId !== selectionIdentity(account)) {
+      throw new Error("Your ChatGPT account or plan changed. Refresh generation settings before choosing a model.");
+    }
     if (!models.some((item) => item.model === model)) throw new Error("The selected ChatGPT model is no longer listed. Refresh models and choose another.");
     const key = preferenceKey(account);
     if (!key) throw new Error("ChatGPT did not identify this account. Sign in again before saving a model.");
