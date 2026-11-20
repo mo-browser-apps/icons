@@ -23,6 +23,26 @@ async function fixture(t, scenario = "success", env = {}) {
 }
 const request = { positivePrompt: "A ceramic fox", negativePrompt: "letters", count: 3 };
 
+test("two-image refinement passes distinct ordered files and cleans them up", async t => {
+  const f = await fixture(t);
+  const second = Buffer.concat([Buffer.from(png, "base64"), Buffer.from("reference")]).toString("base64");
+  const result = await f.provider.generate({ ...request, referenceImageB64: png, additionalReferenceImageB64: second });
+  assert.equal(result.images.length, 3);
+  const events = await f.events();
+  for (const event of events.filter(event => event.method === "turn/start")) {
+    const prompt = event.params.input.find(item => item.type === "text").text;
+    assert.match(prompt, /Preserve the current icon's composition/);
+    assert.doesNotMatch(prompt, /distinct composition/);
+  }
+  const inputs = events.filter(event => event.referenceImages).map(event => event.referenceImages);
+  assert.equal(inputs.length, 3);
+  for (const images of inputs) {
+    assert.deepEqual(images.map(image => image.data), [png, second]);
+    assert.notEqual(images[0].path, images[1].path);
+    for (const image of images) await assert.rejects(stat(image.path), { code: "ENOENT" });
+  }
+});
+
 test("an env-node CLI starts with a sparse Finder-style PATH", async (t) => {
   const inherited = "/moicons-test/no-node-bin";
   const f = await fixture(t, "success", { PATH: inherited });

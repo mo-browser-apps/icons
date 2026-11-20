@@ -47,7 +47,7 @@ export function IconPreviewToolbar() {
     <div className="preview-title"><span>{state?.title || 'Icon preview'}</span><span className="preview-dimensions">{state?.width ? `${state.width} × ${state.height}` : ''}</span></div>
     <div className="preview-controls">
       <div className="preview-control-group" aria-label="Zoom">
-        <button aria-label="Zoom out" title="Zoom out (⌘− / Ctrl−)" disabled={!state || state.factor <= .251} onClick={() => command('out')}><Minus size={16} /></button>
+        <button aria-label="Zoom out" title="Zoom out (⌘− / Ctrl−)" disabled={!state || state.factor <= .01001} onClick={() => command('out')}><Minus size={16} /></button>
         <output aria-live="polite" aria-label="Zoom level">{state ? `${Math.round(state.factor * 100)}%` : '…'}</output>
         <button aria-label="Zoom in" title="Zoom in (⌘+ / Ctrl+)" disabled={!state || state.factor >= 3.999} onClick={() => command('in')}><Plus size={16} /></button>
       </div>

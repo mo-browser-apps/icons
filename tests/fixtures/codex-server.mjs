@@ -45,6 +45,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     const threadId = params.threadId;
     const reference = params.input.find((item) => item.type === "localImage");
     if (reference) log({ referenceExists: existsSync(reference.path), referenceMatches: readFileSync(reference.path).toString("base64") === png });
+    const references = params.input.filter(item => item.type === "localImage");
+    if (references.length > 1) log({ referenceImages: references.map(item => ({ path: item.path, data: readFileSync(item.path).toString("base64") })) });
     event("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
     // Events can arrive before the start response.
     if (scenario === "crash") { process.exit(1); }

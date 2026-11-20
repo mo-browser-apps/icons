@@ -37,7 +37,8 @@ export class OpenRouterProvider implements ImageProvider {
     }
 
     const settings = getImageSettings("openrouter");
-    const providers = await compatibleRouterProviders(settings, request.signal);
+    const references = [request.referenceImageB64, request.additionalReferenceImageB64].filter((image): image is string => !!image);
+    const providers = await compatibleRouterProviders(settings, request.signal, Math.max(1, references.length));
     request.signal?.throwIfAborted();
     const count = Math.max(1, request.count);
 
@@ -49,7 +50,7 @@ export class OpenRouterProvider implements ImageProvider {
           settings,
           providers,
           request.positivePrompt,
-          request.referenceImageB64,
+          references,
           request.signal
         )
       )
@@ -83,7 +84,7 @@ export class OpenRouterProvider implements ImageProvider {
     settings: ImageSettings,
     providers: string[],
     prompt: string,
-    referenceB64?: string,
+    references: string[],
     signal?: AbortSignal
   ): Promise<string> {
     const images = await requestImages(IMAGES_URL, {
@@ -102,11 +103,11 @@ export class OpenRouterProvider implements ImageProvider {
         output_format: "png",
         ...(settings.model === DEFAULT_OPENROUTER_MODEL ? { resolution: "1K" } : {}),
         ...(settings.quality ? { quality: settings.quality } : {}),
-        ...(providers.length ? { provider: { only: providers } } : {}),
-        ...(referenceB64 ? { input_references: [{
+        ...(providers.length ? { provider: { only: providers, ...(references.length > 1 ? { allow_fallbacks: false } : {}) } } : {}),
+        ...(references.length ? { input_references: references.map(referenceB64 => ({
           type: "image_url",
           image_url: { url: `data:image/png;base64,${referenceB64}` },
-        }] } : {}),
+        })) } : {}),
       }),
     }, "OpenRouter", signal);
     return images[0];

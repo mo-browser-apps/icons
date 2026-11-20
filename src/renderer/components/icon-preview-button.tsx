@@ -1,12 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { Maximize2 } from 'lucide-react'
 import { ipc } from '@/gen/ipc'
+import { imageUrlToPngBase64 } from '@/lib/image-normalization'
 import './icon-preview.css'
 
 let latestOpener = 0
 
-export function IconPreviewButton({ src, title = 'Icon preview', label = 'Preview icon', children, className = '' }: {
-  src?: string | null; title?: string; label?: string; children?: ReactNode; className?: string
+export function IconPreviewButton({ src, title = 'Icon preview', label = 'Preview icon', children, className = '', normalize = false }: {
+  src?: string | null; title?: string; label?: string; children?: ReactNode; className?: string; normalize?: boolean
 }) {
   const [error, setError] = useState('')
   return <>
@@ -17,7 +18,11 @@ export function IconPreviewButton({ src, title = 'Icon preview', label = 'Previe
         setError('')
         // Open resolves on close. Keep this trigger available so it can reuse
         // the viewer, including when History switches the image in this button.
-        try { await ipc.preview.Open({ png: src, title }) }
+        try {
+          const png = normalize ? `data:image/png;base64,${await imageUrlToPngBase64(src)}` : src
+          if (opener !== latestOpener) return
+          await ipc.preview.Open({ png, title })
+        }
         catch { setError('Preview couldn’t open. Please try again.') }
         finally {
           requestAnimationFrame(() => { if (trigger.isConnected && opener === latestOpener) trigger.focus() })

@@ -56,7 +56,7 @@ evaluate(async (fixtures) => {
   const { ipc } = await import(moduleURL);
   const state = window.__regression = {
     ipc, fixtures, mode: "success", calls: [], pending: [], cancels: [],
-    originals: { GenerateIcon: ipc.app.GenerateIcon, CancelGeneration: ipc.app.CancelGeneration, PickReferenceImage: ipc.app.PickReferenceImage },
+    originals: { GenerateIcon: ipc.app.GenerateIcon, CancelGeneration: ipc.app.CancelGeneration, PickReferenceImage: ipc.app.PickReferenceImage, RecordIconHistory: ipc.app.RecordIconHistory },
   };
   ipc.app.GenerateIcon = (request) => {
     state.calls.push(request);
@@ -68,6 +68,7 @@ evaluate(async (fixtures) => {
     return Promise.resolve({ images: [fixtures.png, fixtures.jpeg, fixtures.webp], error: "" });
   };
   ipc.app.CancelGeneration = async (request) => { state.cancels.push(request); return {}; };
+  ipc.app.RecordIconHistory = async () => ({ entries: [], hasMore: false, warning: "" });
   return true;
 }, fixtures);
 
@@ -180,12 +181,13 @@ try {
   mode("partial"); click("Regenerate"); wait('[aria-label="Variant 2"]:not([disabled])');
   check("one corrupt image does not discard a usable new variant", () => assert.equal(variants().length, 1));
   click("Variant 2"); click("Select");
-  check("refinement clearly uses the selected icon and disables attachments", () => {
-    assert.ok(evaluate(() => document.body.textContent.includes("Using the selected icon as the reference.")));
-    assert.ok(evaluate(() => document.querySelector('[aria-label="Attach reference image"]').disabled));
+  check("refinement accepts drop and paste without adding another button", () => {
+    assert.equal(evaluate(() => !!document.querySelector('[aria-label="Attach reference image"]')), false);
     assert.ok(event("paste")); assert.ok(event("drop")); assert.ok(event("paste", "png", 1, true));
-    assert.equal(reference(), null);
+    wait('[aria-label="Remove reference image"]');
+    assert.ok(reference());
   });
+  click("Remove reference image");
   const base = variants("img");
   fill(); mode("pause"); click("Submit"); click("Stop");
   check("Stop during refinement preserves the selected base", () => assert.deepEqual(variants("img"), base));

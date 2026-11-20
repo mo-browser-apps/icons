@@ -35,6 +35,7 @@ import { getProvider, resolveProviderName } from './lib/image-provider';
 import { saveImageSettings } from './lib/generation-settings';
 import { removeStoredApiKey, saveValidatedApiKey } from './lib/api-key-settings';
 import { readGenerationSettings } from './lib/read-generation-settings';
+import { getReferenceSupport } from './lib/reference-support';
 import { setGenerationConnection } from './lib/set-generation-connection';
 import { getCodexStatus, startCodexLogin, cancelCodexLogin, setCodexAppPath } from './lib/codex-account';
 import { getCodexAppPath } from './lib/codex-location';
@@ -486,11 +487,18 @@ ipc.registerService(AppServiceDescriptor, {
     const controller = new AbortController();
     generations.set(request.requestId, controller);
     try {
-      const { positive, negative } = buildPrompt(request.prompt);
+      if (request.additionalReferenceImage) {
+        if (!request.referenceImage) throw new Error('Select an icon before adding an extra reference.');
+        const support = await getReferenceSupport();
+        if (support.status !== 'supported') throw new Error(support.message);
+      }
+      controller.signal.throwIfAborted();
+      const { positive, negative } = buildPrompt(request.prompt, !!request.additionalReferenceImage);
       const result = await getProvider().generate({
         positivePrompt: positive,
         negativePrompt: negative,
         referenceImageB64: request.referenceImage || undefined,
+        additionalReferenceImageB64: request.additionalReferenceImage || undefined,
         count: 3,
         signal: controller.signal,
       });
@@ -549,6 +557,8 @@ ipc.registerService(AppServiceDescriptor, {
   async GetGenerationSettings(request: GetGenerationSettingsRequest) {
     return readGenerationSettings(request.refresh);
   },
+
+  async GetReferenceSupport() { return getReferenceSupport(); },
 
   async SetGenerationSettings(request: SetGenerationSettingsRequest) {
     try {
