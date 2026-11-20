@@ -71,6 +71,11 @@ const click = async (name, scope = "#settings-test button, dialog[open] button")
   await evaluate(() => { document.querySelectorAll("[data-test-click]").forEach((button) => button.removeAttribute("data-test-click")); });
 };
 const openKey = async () => { await click("Generation settings"); await click("Change API key"); await wait(() => !!document.querySelector("dialog[open] #generation-api-key:not(:disabled)")); };
+const openChatGPTConnection = async () => {
+  await click("Change method");
+  await click("ChatGPTUse your ChatGPT account through the desktop app. No API key needed.");
+  await wait(() => !!document.querySelector("dialog[open] [role=status]"));
+};
 const keyMatches = (value) => evaluate((value) => document.querySelector("dialog[open] #generation-api-key")?.value === value, value);
 const fillKey = async (value) => {
   if (!command) { agent("fill", "--selector", "dialog[open] #generation-api-key", "--value", value); return; }
@@ -181,11 +186,13 @@ try {
       state.accountEmail = "test@example.com";
       state.readyChanges = [];
       state.modelWrites = [];
+      state.modelSaveError = false;
+      state.modelLoadError = false;
       state.codexModels = [
         { id: "gpt-6.2-sol", name: "GPT-6.2 Sol", qualities: [], maxReferenceImages: 0 },
         { id: "gpt-6.2-astra", name: "GPT-6.2 Astra", qualities: [], maxReferenceImages: 0 },
       ];
-      state.settings = { ...state.settings, provider: "codex", model: "gpt-6.2-sol", quality: "", models: state.codexModels, error: "", ready: false, codex: { state: "not_installed", email: "", error: "" } };
+      state.settings = { ...state.settings, provider: "codex", apiKeyRequired: false, model: "gpt-6.2-sol", quality: "", models: state.codexModels, error: "", errorCode: "", ready: false, codex: { state: "not_installed", email: "", error: "" } };
       ipc.app.StartCodexLogin = async () => {
         state.loginStarts++;
         if (state.loginMode === "delay") await new Promise((resolve) => { state.resolveLoginStart = resolve; });
@@ -198,11 +205,17 @@ try {
         state.statusReads++;
         return state.loginState || { state: state.savedPath ? "ready" : "not_installed", email: state.savedPath ? state.accountEmail : "", error: "" };
       };
-      ipc.app.GetGenerationSettings = async () => ({ ...state.settings,
-        model: state.codexModels.some(m => m.id === state.settings.model) ? state.settings.model : state.codexModels[0]?.id || "",
-        models: state.codexModels, codex: await ipc.app.GetCodexStatus({}) });
+      ipc.app.GetGenerationSettings = async () => {
+        const codex = await ipc.app.GetCodexStatus({});
+        return { ...state.settings,
+          ready: state.settings.ready && codex.state === "ready" && !state.modelLoadError,
+          model: state.codexModels.some(m => m.id === state.settings.model) ? state.settings.model : state.codexModels[0]?.id || "",
+          models: state.modelLoadError ? [] : state.codexModels, codex,
+          error: state.modelLoadError ? "Could not load ChatGPT models. Try again." : "",
+          errorCode: state.modelLoadError ? "codex_models" : "" };
+      };
       ipc.app.SetGenerationSettings = async request => {
-        if (state.modelSaveError) return { error: "Your ChatGPT account changed. Refresh generation settings before choosing a model." };
+        if (state.modelSaveError || request.expectedCodexEmail !== state.accountEmail) return { error: "Your ChatGPT account changed. Refresh generation settings before choosing a model." };
         state.modelWrites.push(request);
         state.settings.model = request.model;
         return { error: "" };
@@ -227,7 +240,12 @@ try {
         state.savedPath = appPath;
         return { appPath, error: "" };
       };
-      state.root.render(React.createElement(GenerationSettings, { key: "codex", disabled: false, connectionRequest: 0, onReadyChange: (ready) => { state.readyChanges.push(ready); } }));
+      const onReadyChange = (ready) => { state.readyChanges.push(ready); };
+      const key = `codex-${state.codexMount = (state.codexMount || 0) + 1}`;
+      state.renderCodex = (requests = {}) => state.root.render(React.createElement(GenerationSettings, {
+        key, disabled: false, connectionRequest: 0, modelRequest: 0, onReadyChange, ...requests,
+      }));
+      state.renderCodex();
     };
   });
   await wait(() => !!document.querySelector('#settings-test button:not(:disabled)'));
@@ -422,8 +440,17 @@ try {
   assert.equal(await evaluate(() => window.__settingsTest.savedPath), customPath);
   assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "ChatGPT");
   await click("Use this account");
+  await wait(() => !!document.querySelector("dialog[open] #generation-model:not(:disabled)"));
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "Generation settings");
+  assert.equal(await evaluate(() => !!document.querySelector("dialog[open] [role=status]")), false);
+  await click("Back");
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Connected to MōIcons"));
+  assert.equal(await evaluate(() => !!document.querySelector("dialog[open] select")), false);
+  await click("Continue");
+  await click("Done");
   await wait(() => !document.querySelector("dialog[open]"));
   await click("Generation settings");
+  await openChatGPTConnection();
   await wait(() => document.querySelector("dialog[open]")?.textContent.includes("Connected to MōIcons"));
   assert.equal(await evaluate(() => document.querySelector('[aria-label^="Selected app:"]')?.textContent), customPath);
   await screenshot("chatgpt-app-selected");
@@ -460,8 +487,11 @@ try {
   assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), false);
   assert.equal(await evaluate(() => window.__settingsTest.connectionWrites), connectionsBeforeLogin);
   await click("Use this account");
+  await wait(() => !!document.querySelector("dialog[open] #generation-model:not(:disabled)"));
+  await click("Done");
   await wait(() => !document.querySelector("dialog[open]"));
   await click("Generation settings");
+  await openChatGPTConnection();
   await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Connected to MōIcons"));
   assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), true);
   assert.equal(await evaluate(() => window.__settingsTest.settings.codex.email), "renewed@example.com");
@@ -496,13 +526,31 @@ try {
   assert.deepEqual(await evaluate(() => window.__settingsTest.externalUrls), []);
   check("Done closes a missing-app state without installing or changing the connection");
 
-  await evaluate(() => { const state = window.__settingsTest; state.savedPath = "/Applications/ChatGPT.app"; state.accountEmail = "test@example.com"; state.settings.codex = { state: "ready", email: "test@example.com", error: "" }; });
+  await evaluate(() => { window.__settingsTest.savedPath = "/Applications/ChatGPT.app"; });
   await click("Generation settings");
-  await wait(() => !!document.querySelector("#chatgpt-model:not(:disabled)"));
-  assert.deepEqual(await evaluate(() => [...document.querySelector("#chatgpt-model").options].map(o => o.textContent)), ["GPT-6.2 Sol", "GPT-6.2 Astra"]);
-  assert.equal(await evaluate(() => !!document.querySelector("dialog[open] fieldset")), false);
+  await wait(() => document.querySelector("dialog[open] [role=status]")?.textContent.includes("Connected to MōIcons"));
+  await click("Continue");
+  await wait(() => !!document.querySelector("dialog[open] #generation-model:not(:disabled)"));
+  await click("Done");
+  await wait(() => !document.querySelector("dialog[open]"));
   await evaluate(() => {
-    const select = document.querySelector("#chatgpt-model");
+    const state = window.__settingsTest;
+    state.mountCodex();
+    state.savedPath = "/Applications/ChatGPT.app";
+    state.settings.ready = true;
+    state.settings.codex = { state: "ready", email: "test@example.com", error: "" };
+  });
+  await wait(() => document.querySelector('#settings-test [aria-label="Generation settings"]')?.textContent === "GPT-6.2 Sol");
+  await evaluate(() => window.__settingsTest.renderCodex({ modelRequest: 1 }));
+  await wait(() => !!document.querySelector("#generation-model:not(:disabled)"));
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "Generation settings");
+  assert.equal(await evaluate(() => document.activeElement.id), "generation-model");
+  assert.equal(await evaluate(() => !!document.querySelector("dialog[open] [role=status]")), false);
+  assert.deepEqual(await evaluate(() => [...document.querySelector("#generation-model").options].map(o => o.textContent)), ["GPT-6.2 Sol", "GPT-6.2 Astra"]);
+  assert.equal(await evaluate(() => !!document.querySelector("dialog[open] fieldset")), false);
+  check("ChatGPT uses the shared model screen for setup, the prompt button, and model requests; connection controls remain separate");
+  await evaluate(() => {
+    const select = document.querySelector("#generation-model");
     select.value = "gpt-6.2-astra";
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
@@ -513,12 +561,13 @@ try {
     provider: "codex", model: "gpt-6.2-astra", quality: "", expectedCodexEmail: "test@example.com",
   });
   await click("Generation settings");
-  await wait(() => document.querySelector("#chatgpt-model:not(:disabled)")?.value === "gpt-6.2-astra");
+  await wait(() => document.querySelector("#generation-model:not(:disabled)")?.value === "gpt-6.2-astra");
+  assert.equal(await evaluate(() => document.querySelector('#settings-test [aria-label="Generation settings"]').textContent), "GPT-6.2 Astra");
   check("ChatGPT model selection saves with the expected account and survives reopening");
 
   await evaluate(() => { window.__settingsTest.codexModels = window.__settingsTest.codexModels.slice(0, 1); });
-  await click("Refresh ChatGPT models");
-  await wait(() => document.querySelector("#chatgpt-model:not(:disabled)")?.value === "gpt-6.2-sol");
+  await click("Refresh models");
+  await wait(() => document.querySelector("#generation-model:not(:disabled)")?.value === "gpt-6.2-sol");
   check("refresh removes unavailable ChatGPT models and selects the new default");
 
   await evaluate(() => {
@@ -526,13 +575,30 @@ try {
     state.codexModels.push({ id: "gpt-6.2-astra", name: "GPT-6.2 Astra", qualities: [], maxReferenceImages: 0 });
     state.modelSaveError = true;
   });
-  await click("Refresh ChatGPT models");
-  await wait(() => !!document.querySelector("#chatgpt-model:not(:disabled)"));
+  await click("Refresh models");
+  await wait(() => !!document.querySelector("#generation-model:not(:disabled)"));
   await click("Done");
   await wait(() => document.querySelector("dialog[open] [role=alert]")?.textContent.includes("account changed"));
   await screenshot("chatgpt-model-save-error");
   await click("Close generation settings");
   check("a rejected model save keeps the settings open with an actionable error");
+
+  await evaluate(() => { window.__settingsTest.modelSaveError = false; window.__settingsTest.modelLoadError = true; });
+  await click("Generation settings");
+  await click("Refresh models");
+  await wait(() => document.querySelector("dialog[open] [role=alert]")?.textContent.includes("Could not load ChatGPT models"));
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "Generation settings");
+  assert.ok(await evaluate(() => document.querySelector("#generation-model").disabled));
+  assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), false);
+  await click("Close generation settings");
+  await click("Generation settings");
+  assert.equal(await evaluate(() => document.querySelector("dialog[open] h2").textContent), "Generation settings");
+  await evaluate(() => { window.__settingsTest.modelLoadError = false; });
+  await click("Refresh models");
+  await wait(() => !!document.querySelector("#generation-model:not(:disabled)"));
+  assert.equal(await evaluate(() => window.__settingsTest.readyChanges.at(-1)), true);
+  check("catalog errors stay on the model screen and recover through Refresh without reconnecting");
+  await click("Close generation settings");
 
 } finally {
   await evaluate(() => {
