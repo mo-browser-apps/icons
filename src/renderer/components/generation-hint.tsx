@@ -7,7 +7,7 @@ function GenerationHintText() {
     <>
       <p className="text-sm font-medium text-foreground/80">Generating 3 variants of your icon…</p>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        Generation can take a little while.<br />Thanks for your patience.
+        This can take several minutes.
       </p>
     </>
   )
