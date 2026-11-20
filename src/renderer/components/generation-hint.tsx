@@ -5,7 +5,7 @@ const GENERATION_HINT_DELAY_MS = 6_000
 function GenerationHintText() {
   return (
     <>
-      <p className="text-sm font-medium text-foreground/80">Still creating your icons…</p>
+      <p className="text-sm font-medium text-foreground/80">Generating 3 variants of your icon…</p>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         Generation can take a little while.<br />Thanks for your patience.
       </p>
