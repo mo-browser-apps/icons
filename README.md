@@ -174,3 +174,27 @@ is deterministic sample artwork for visual comparisons, not a model-quality test
 ## Download
 
 You can download the app from the [releases page](https://github.com/mo-browser-apps/icons/releases). All releases are signed and notarized by Apple.
+
+### Preview DMGs for testing
+
+Once `.github/workflows/preview-dmg.yml` is on `master`, open **Actions → Preview
+DMG → Run workflow**. Leave the workflow branch on `master`, set **source_ref**
+to the branch or full commit SHA containing the changes to test, and choose
+**arm64** for Apple Silicon or **x64** for Intel. Only build trusted repository
+code: this job uses the repository's Apple signing credentials.
+
+The workflow builds and notarizes **MoIcons Preview.app**, using a separate bundle
+identifier and disabling the production update feed. It preserves the source's
+numeric app version; the download name includes the workflow run, attempt, source
+commit, and architecture. The run summary links to a seven-day artifact containing
+the DMG, its SHA-256 checksum, and the source commit. Download and unzip that
+artifact, then share the DMG with the tester. GitHub requires sign-in and repository
+read access to download Actions artifacts; these are temporary downloads, not
+private releases.
+
+The workflow uses the same `MAC_CERTIFICATE`, `MAC_CERTIFICATE_PWD`,
+`MAC_CODESIGN_IDENTITY`, `MAC_TEAM_ID`, `MAC_APPLE_ID`, and `MAC_APPLE_PASSWORD`
+repository secrets as the release workflow. It fails if credentials, signature
+verification, or notarization are missing or invalid. It does not run MōControl
+release steps, create a tag or GitHub Release, or upload update packages. A preview
+run can be deleted after testing; no tag cleanup is needed.

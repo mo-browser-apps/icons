@@ -1,0 +1,167 @@
+name: Preview DMG
+run-name: Preview DMG • ${{ inputs.source_ref }} • ${{ inputs.architecture }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or full commit SHA to build (must be trusted code)
+        required: true
+        default: master
+        type: string
+      architecture:
+        description: Mac architecture (arm64 for Apple Silicon, x64 for Intel)
+        required: true
+        default: arm64
+        type: choice
+        options:
+          - arm64
+          - x64
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PREVIEW_ARCH: ${{ inputs.architecture }}
+    steps:
+      - name: Check out preview source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Prepare preview identity
+        run: |
+          set -euo pipefail
+          case "$PREVIEW_ARCH" in arm64|x64) ;; *) exit 1 ;; esac
+          commit="$(git rev-parse HEAD)"
+          echo "PREVIEW_COMMIT=$commit" >> "$GITHUB_ENV"
+          echo "PREVIEW_NAME=MoIcons-preview-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}-${commit:0:12}-$PREVIEW_ARCH" >> "$GITHUB_ENV"
+          # Inline preparation also works for source branches that predate this workflow.
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'mobrowser.conf.json';
+          const config = JSON.parse(readFileSync(path, 'utf8'));
+          config.app.name = 'MoIcons Preview';
+          delete config.app.updateServerUrl;
+          const mac = config.app.bundle.macOS;
+          mac.bundleID = 'com.teamdev.MoIcons.preview';
+          mac.codesignIdentity = '${MACOS_CODESIGN_IDENTITY}';
+          mac.teamID = '${MACOS_TEAM_ID}';
+          mac.appleID = '${MACOS_APPLE_ID}';
+          mac.password = '${MACOS_APPLE_PASSWORD}';
+          mac.installer ??= {};
+          mac.installer.dmg ??= {};
+          mac.installer.dmg.name = '';
+          mac.installer.dmg.volumeName = config.app.name;
+          mac.installer.dmg.window ??= {};
+          mac.installer.dmg.window.skipPrettifying = true;
+          writeFileSync(path, JSON.stringify(config, null, 2) + '\n');
+          NODE
+      - name: Install dependencies
+        run: npm ci
+      - name: Build, sign, notarize, and verify preview
+        env:
+          MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
+          MAC_CERTIFICATE_PWD: ${{ secrets.MAC_CERTIFICATE_PWD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MAC_CODESIGN_IDENTITY }}
+          MACOS_TEAM_ID: ${{ secrets.MAC_TEAM_ID }}
+          MACOS_APPLE_ID: ${{ secrets.MAC_APPLE_ID }}
+          MACOS_APPLE_PASSWORD: ${{ secrets.MAC_APPLE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MAC_CERTIFICATE:?Missing repository secret MAC_CERTIFICATE}"
+          : "${MAC_CERTIFICATE_PWD:?Missing repository secret MAC_CERTIFICATE_PWD}"
+          : "${MACOS_CODESIGN_IDENTITY:?Missing repository secret MAC_CODESIGN_IDENTITY}"
+          : "${MACOS_TEAM_ID:?Missing repository secret MAC_TEAM_ID}"
+          : "${MACOS_APPLE_ID:?Missing repository secret MAC_APPLE_ID}"
+          : "${MACOS_APPLE_PASSWORD:?Missing repository secret MAC_APPLE_PASSWORD}"
+
+          previous_umask="$(umask)"
+          umask 077
+          keychain="$RUNNER_TEMP/preview-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          for certificate in AppleRootCA-G3 AppleWWDRCAG6 DeveloperIDG2CA; do
+            curl -fsSL "https://www.apple.com/certificateauthority/$certificate.cer" -o "$RUNNER_TEMP/$certificate.cer"
+            security import "$RUNNER_TEMP/$certificate.cer" -k "$keychain"
+          done
+          printf '%s' "$MAC_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/preview-signing.p12"
+          security import "$RUNNER_TEMP/preview-signing.p12" -k "$keychain" -P "$MAC_CERTIFICATE_PWD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/preview-signing.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain"
+          umask "$previous_umask"
+
+          # macos-15 is Apple Silicon; the CLI downloads the Intel SDK for --x64.
+          if [[ "$PREVIEW_ARCH" == x64 ]]; then
+            npm run build -- --x64
+          else
+            npm run build
+          fi
+          shopt -s nullglob
+          apps=(build/dist/mac-"$PREVIEW_ARCH"/bin/*.app)
+          [[ ${#apps[@]} -eq 1 ]] || { echo 'Expected exactly one app bundle'; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "${apps[0]}"
+          xcrun stapler validate "${apps[0]}"
+          spctl --assess --type exec --verbose=4 "${apps[0]}"
+
+          if [[ "$PREVIEW_ARCH" == x64 ]]; then
+            npm run pack -- --x64
+          else
+            npm run pack
+          fi
+          dmgs=(build/dist/mac-"$PREVIEW_ARCH"/pack/*.dmg)
+          [[ ${#dmgs[@]} -eq 1 ]] || { echo 'Expected exactly one DMG'; exit 1; }
+          # Verify and staple the final container as well as the enclosed app.
+          codesign --force --timestamp --sign "$MACOS_CODESIGN_IDENTITY" "${dmgs[0]}"
+          xcrun notarytool submit "${dmgs[0]}" --apple-id "$MACOS_APPLE_ID" \
+            --password "$MACOS_APPLE_PASSWORD" --team-id "$MACOS_TEAM_ID" --wait --timeout 20m
+          xcrun stapler staple "${dmgs[0]}"
+          codesign --verify --strict --verbose=2 "${dmgs[0]}"
+          xcrun stapler validate "${dmgs[0]}"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "${dmgs[0]}"
+
+          mkdir -p "$RUNNER_TEMP/preview-artifact"
+          cp "${dmgs[0]}" "$RUNNER_TEMP/preview-artifact/$PREVIEW_NAME.dmg"
+      - name: Record source and checksum
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/preview-artifact"
+          shasum -a 256 "$PREVIEW_NAME.dmg" > SHA256SUMS.txt
+          printf 'Source commit: %s\nArchitecture: %s\nBuild: %s/%s/actions/runs/%s\n' \
+            "$PREVIEW_COMMIT" "$PREVIEW_ARCH" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > BUILD.txt
+      - name: Upload preview installer
+        id: upload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ${{ env.PREVIEW_NAME }}
+          path: ${{ runner.temp }}/preview-artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Link download in run summary
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          printf '### MoIcons Preview\n\n[Download the signed and notarized DMG](%s) (expires after 7 days).\n\nSource: `%s` · Architecture: `%s`\n\nInstalls as **MoIcons Preview**, with production updates disabled. No release or tag was created.\n' \
+            "$ARTIFACT_URL" "$PREVIEW_COMMIT" "$PREVIEW_ARCH" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/preview-signing.p12"
+          if [[ -f "$RUNNER_TEMP/preview-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/preview-signing.keychain-db"
+          fi
