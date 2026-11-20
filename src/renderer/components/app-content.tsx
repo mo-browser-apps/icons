@@ -282,7 +282,7 @@ export function AppContent() {
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" inert={historyOpen} style={{ visibility: historyOpen ? "hidden" : undefined }}>
 
       {/* Make room for the attachment and its compatibility feedback. */}
-      <div className={cn("flex flex-1 items-center justify-center px-10 pb-4", attachment ? "min-h-[184px] pt-6" : "min-h-[208px] pt-12")}>
+      <div className={cn("flex flex-1 items-center justify-center px-10 pb-4", attachment ? "min-h-[184px] pt-6" : "min-h-[208px] pt-12", iconState === "generating" && (attachment ? "min-h-[280px]" : "min-h-[304px]"))}>
         <MacOSIcon
           state={iconState}
           selected={selectedVariant}
