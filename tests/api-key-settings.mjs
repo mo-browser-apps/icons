@@ -36,6 +36,8 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
   const imageSettings = load(fileURLToPath(new URL("../src/main/lib/generation-settings.ts", import.meta.url)));
   const connectionHandler = load(fileURLToPath(new URL("../src/main/lib/set-generation-connection.ts", import.meta.url)));
   const account = load(fileURLToPath(new URL("../src/main/lib/codex-account.ts", import.meta.url)));
+  const codexModels = load(fileURLToPath(new URL("../src/main/lib/codex-models.ts", import.meta.url)));
+  codexModels.readCodexModelSettings = async () => ({ codexSelectionId: "test-account-plus", model: "gpt-6.2-sol", models: [{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol", qualities: [], maxReferenceImages: 2 }] });
   return {
     save: apiKeys.saveValidatedApiKey,
     remove: apiKeys.removeStoredApiKey,
@@ -45,7 +47,7 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
     readSettings: settings.readGenerationSettings,
     saveImageSettings: imageSettings.saveImageSettings,
     setConnection: (connection, running = false) => connectionHandler.setGenerationConnection(connection, running),
-    account,
+    account, codexModels,
     values, writes: () => writes,
   };
 }
@@ -62,6 +64,7 @@ test("OpenAI validates through the authenticated model list, then preserves a su
   assert.equal(result.model, saved.model);
   assert.equal(result.quality, saved.quality);
   assert.equal(result.hasApiKey, true);
+  assert.equal(result.codexSelectionId, "");
   assert.equal(app.values.get(keyPref), "sk-test");
   assert.equal(app.writes(), 1);
 });
@@ -78,6 +81,7 @@ test("a forced ChatGPT provider can confirm a newly signed-in account without pe
   assert.equal(confirmed.ready, true);
   assert.equal(confirmed.provider, "codex");
   assert.equal(confirmed.codex.email, "test@example.com");
+  assert.equal(confirmed.codexSelectionId, "test-account-plus");
   for (const connection of ["api", "none"]) await assert.rejects(app.setConnection(connection), /provider is fixed/);
   assert.equal(app.writes(), 0);
   assert.deepEqual(Object.fromEntries(app.values), initial);
@@ -89,6 +93,21 @@ test("other forced providers still reject connection changes", async () => {
     for (const connection of ["codex", "api", "none"]) await assert.rejects(app.setConnection(connection), /provider is fixed/);
     assert.equal(app.writes(), 0);
   }
+});
+
+test("ChatGPT catalog failures prevent readiness and preserve the previous connection", async () => {
+  const app = subject(async () => catalog());
+  app.account.getCodexStatus = async () => ({ state: "ready", email: "test@example.com", error: "" });
+  app.codexModels.readCodexModelSettings = async () => { throw new Error("Could not load ChatGPT models."); };
+  await assert.rejects(app.setConnection("codex"), /Could not load ChatGPT models/);
+  assert.equal(app.provider(), "openai");
+  assert.equal(app.writes(), 0);
+  app.useConnection("codex");
+  const result = await app.readSettings();
+  assert.equal(result.ready, false);
+  assert.equal(result.codex.state, "ready");
+  assert.equal(result.errorCode, "codex_models");
+  assert.equal(result.models.length, 0);
 });
 
 test("connection changes validate the selected method and refuse disconnect during generation", async () => {

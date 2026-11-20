@@ -40,6 +40,7 @@ import { setGenerationConnection } from './lib/set-generation-connection';
 import { getCodexStatus, startCodexLogin, cancelCodexLogin, setCodexAppPath } from './lib/codex-account';
 import { getCodexAppPath } from './lib/codex-location';
 import { closeCodexSessions } from './lib/codex-client';
+import { saveCodexModel } from './lib/codex-models';
 import {
   getResolvedApiKey,
   getStoredApiProvider,
@@ -564,8 +565,8 @@ ipc.registerService(AppServiceDescriptor, {
     try {
       const provider = resolveProviderName();
       if (request.provider !== provider) throw new Error('Your provider changed. Reopen generation settings.');
-      if (provider === 'codex') throw new Error('ChatGPT manages its own image model and quality.');
-      await saveImageSettings(provider, getResolvedApiKey(), {
+      if (provider === 'codex') await saveCodexModel(request.model, request.expectedCodexEmail, request.expectedCodexSelectionId);
+      else await saveImageSettings(provider, getResolvedApiKey(), {
         model: request.model, quality: request.quality,
       });
       return { error: '' };

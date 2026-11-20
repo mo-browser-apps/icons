@@ -7,7 +7,7 @@ export interface CodexStatus {
   email: string;
   error: string;
 }
-export interface CodexAccount { account: { type: string; email?: string } | null }
+export interface CodexAccount { account: { type: string; email?: string | null; planType?: string } | null }
 let login: { client: CodexClient; id: string; timer: ReturnType<typeof setTimeout>; unsubscribe: () => void } | undefined;
 let starting: { client?: CodexClient } | undefined;
 let loginError = "";

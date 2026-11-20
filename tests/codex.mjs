@@ -6,22 +6,132 @@ import path from "node:path";
 import { mainLoader } from "./helpers/load-main.mjs";
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=";
-async function fixture(t, scenario = "success", env = {}) {
+async function fixture(t, scenario = "success", env = {}, prefs) {
   const dir = await mkdtemp(path.join(tmpdir(), "moicons-protocol-test-"));
   const executable = path.join(dir, "codex");
   await copyFile(new URL("./fixtures/codex-server.mjs", import.meta.url), executable);
   await chmod(executable, 0o700);
   await symlink(process.execPath, path.join(dir, "node"));
   const logfile = path.join(dir, "events.jsonl");
-  const load = mainLoader({ env: { ...process.env, ...env, OPENAI_API_KEY: "must-not-inherit", CODEX_API_KEY: "must-not-inherit",
+  const load = mainLoader({ prefs, env: { ...process.env, ...env, OPENAI_API_KEY: "must-not-inherit", CODEX_API_KEY: "must-not-inherit",
     MOICONS_CODEX_PATH: executable, MOICONS_TEST_LOG: logfile, MOICONS_TEST_SCENARIO: scenario } });
   const { CodexImageProvider } = load(path.resolve("src/main/lib/providers/codex.ts"));
   const account = load(path.resolve("src/main/lib/codex-account.ts"));
+  const models = load(path.resolve("src/main/lib/codex-models.ts"));
   const { closeCodexSessions } = load(path.resolve("src/main/lib/codex-client.ts"));
   t.after(async () => { await account.cancelCodexLogin(); await closeCodexSessions(); await rm(dir, { recursive: true, force: true }); });
-  return { provider: new CodexImageProvider(), account, dir, events: async () => (await readFile(logfile, "utf8")).trim().split("\n").map(JSON.parse) };
+  return { provider: new CodexImageProvider(), account, models, dir, events: async () => (await readFile(logfile, "utf8")).trim().split("\n").map(JSON.parse) };
 }
 const request = { positivePrompt: "A ceramic fox", negativePrompt: "letters", count: 3 };
+
+function modelPrefs() {
+  const values = new Map();
+  const prefs = { getString: key => values.get(key) || "", setString: (key, value) => values.set(key, value),
+    remove: key => values.delete(key), persist: () => true };
+  return { prefs, values };
+}
+
+test("generation uses the catalog's Astra for Pro and Sol for other plans instead of inherited model, effort, and speed", async t => {
+  for (const plan of ["pro", "prolite", "pro_200", "plus", "go", "unknown"]) {
+    const f = await fixture(t, "success", { MOICONS_TEST_PLAN: plan, MOICONS_TEST_PAGE_SIZE: "1" });
+    await f.provider.generate({ ...request, count: 1 });
+    const events = await f.events();
+    const start = events.find(e => e.method === "thread/start").params;
+    const pro = plan.startsWith("pro");
+    assert.equal(start.model, pro ? "gpt-6.2-astra" : "gpt-6.2-sol");
+    assert.equal(start.config.model_reasoning_effort, pro ? "medium" : "low");
+    assert.equal(start.config.service_tier, "default");
+    assert.equal(events.filter(e => e.method === "model/list").length, 2);
+    assert.ok(events.filter(e => e.method === "model/list").every(e => e.params.modelProvider === "openai"));
+  }
+});
+
+test("a saved model is revalidated, used for every variant, and scoped to its account and plan", async t => {
+  const { prefs, values } = modelPrefs();
+  const f = await fixture(t, "success", {}, prefs);
+  const { codexSelectionId } = await f.models.readCodexModelSettings("test@example.com");
+  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId);
+  assert.equal((await f.models.readCodexModelSettings("test@example.com")).model, "gpt-6.2-astra");
+  await f.provider.generate(request);
+  assert.ok((await f.events()).filter(e => e.method === "thread/start").every(e => e.params.model === "gpt-6.2-astra"));
+  const other = await fixture(t, "success", { MOICONS_TEST_EMAIL: "other@example.com" }, prefs);
+  assert.equal((await other.models.readCodexModelSettings("other@example.com")).model, "gpt-6.2-sol");
+  const changedPlan = await fixture(t, "success", { MOICONS_TEST_PLAN: "go" }, prefs);
+  assert.equal((await changedPlan.models.readCodexModelSettings("test@example.com")).model, "gpt-6.2-sol");
+  assert.ok([...values.keys()].every(key => !key.includes("example.com")));
+});
+
+test("removed saved models use a listed default; hidden and text-only models never enter the selector", async t => {
+  const { prefs } = modelPrefs();
+  const f = await fixture(t, "success", {}, prefs);
+  const { codexSelectionId } = await f.models.readCodexModelSettings("test@example.com");
+  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId);
+  const catalog = [
+    { model: "gpt-6.2-astra", displayName: "Hidden", hidden: true },
+    { model: "gpt-6.2-sol", displayName: "Text only", inputModalities: ["text"] },
+    { model: "account-default", displayName: "Account default", isDefault: true,
+      defaultReasoningEffort: "xhigh", supportedReasoningEfforts: [{ reasoningEffort: "low" }], inputModalities: ["text", "image"] },
+  ];
+  const restricted = await fixture(t, "success", { MOICONS_TEST_MODELS: JSON.stringify(catalog) }, prefs);
+  const settings = await restricted.models.readCodexModelSettings("test@example.com");
+  assert.deepEqual(Array.from(settings.models, model => model.id), ["account-default"]);
+  await restricted.provider.generate({ ...request, count: 1 });
+  const start = (await restricted.events()).find(e => e.method === "thread/start").params;
+  assert.equal(start.model, "account-default");
+  assert.equal(start.config.model_reasoning_effort, "low");
+});
+
+test("empty or failed catalogs stop before any thread or generation starts", async t => {
+  for (const scenario of ["success", "model-list-error"]) {
+    const f = await fixture(t, scenario, { MOICONS_TEST_MODELS: "[]" });
+    await assert.rejects(f.provider.generate(request), /No compatible ChatGPT models|could not complete/);
+    assert.ok(!(await f.events()).some(e => ["thread/start", "turn/start"].includes(e.method)));
+  }
+});
+
+test("model saves reject stale accounts and missing models, and roll back persistence failures without generating", async t => {
+  const { prefs, values } = modelPrefs();
+  const f = await fixture(t, "success", {}, prefs);
+  const { codexSelectionId } = await f.models.readCodexModelSettings("test@example.com");
+  await assert.rejects(f.models.saveCodexModel("unlisted", "test@example.com", codexSelectionId), /no longer listed/);
+  await assert.rejects(f.models.saveCodexModel("gpt-6.2-sol", "previous@example.com", codexSelectionId), /account changed/);
+  assert.equal(values.size, 0);
+  prefs.persist = () => false;
+  await assert.rejects(f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId), /Could not save/);
+  assert.equal(values.size, 0);
+  prefs.persist = () => true;
+  await f.models.saveCodexModel("gpt-6.2-astra", "test@example.com", codexSelectionId);
+  prefs.persist = () => false;
+  await assert.rejects(f.models.saveCodexModel("gpt-6.2-sol", "test@example.com", codexSelectionId), /Could not save/);
+  assert.equal((await f.models.readCodexModelSettings("test@example.com")).model, "gpt-6.2-astra");
+  assert.ok(!(await f.events()).some(e => e.method === "turn/start"));
+});
+
+test("a stale plan or missing selection identity cannot overwrite another plan's model choice", async t => {
+  const { prefs, values } = modelPrefs();
+  const pro = await fixture(t, "success", { MOICONS_TEST_PLAN: "pro" }, prefs);
+  const plus = await fixture(t, "success", { MOICONS_TEST_PLAN: "plus" }, prefs);
+  const proSettings = await pro.models.readCodexModelSettings("test@example.com");
+  await pro.models.saveCodexModel("gpt-6.2-astra", "test@example.com", proSettings.codexSelectionId);
+  const plusSettings = await plus.models.readCodexModelSettings("test@example.com");
+  assert.equal(plusSettings.model, "gpt-6.2-sol");
+  assert.notEqual(proSettings.codexSelectionId, plusSettings.codexSelectionId);
+  assert.match(proSettings.codexSelectionId, /^[a-f0-9]{64}$/);
+  const before = [...values];
+  await assert.rejects(pro.models.saveCodexModel(plusSettings.model, "test@example.com", plusSettings.codexSelectionId), /account or plan changed/);
+  await assert.rejects(plus.models.saveCodexModel(proSettings.model, "test@example.com", proSettings.codexSelectionId), /account or plan changed/);
+  await assert.rejects(pro.models.saveCodexModel(plusSettings.model, "test@example.com", ""), /account or plan changed/);
+  assert.deepEqual([...values], before);
+  assert.equal((await pro.models.readCodexModelSettings("test@example.com")).model, "gpt-6.2-astra");
+  assert.ok(!(await pro.events()).some(e => e.method === "turn/start"));
+});
+
+test("ChatGPT model options advertise the existing two-reference generation path", async t => {
+  const f = await fixture(t);
+  const settings = await f.models.readCodexModelSettings("test@example.com");
+  assert.ok(settings.models.length > 0);
+  assert.ok(settings.models.every(model => model.maxReferenceImages === 2));
+});
 
 test("two-image refinement passes distinct ordered files and cleans them up", async t => {
   const f = await fixture(t);

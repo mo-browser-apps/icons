@@ -25,8 +25,11 @@ function savedDraft(settings: GetGenerationSettingsResponse) {
   return model ? defaultsFor(model, settings.quality) : { model: settings.model, quality: settings.quality }
 }
 
-const needsConnection = (settings: GetGenerationSettingsResponse) => !settings.ready
+const needsConnection = (settings: GetGenerationSettingsResponse) => !settings.ready &&
+  !(settings.provider === "codex" && settings.codex?.state === "ready" && settings.errorCode === "codex_models")
 type Step = "connection" | "codex" | "key" | "models" | "remove"
+const settingsStep = (settings: GetGenerationSettingsResponse): Step =>
+  needsConnection(settings) ? settings.provider === "codex" ? "codex" : "connection" : "models"
 
 export function GenerationSettings({ disabled, connectionRequest, modelRequest = 0, requiresExtraReference = false, onSettingsChange, onReadyChange }: {
   disabled: boolean
@@ -72,7 +75,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       setDraft(savedDraft(response))
       setError(response.error)
       onReadyChange(response.ready)
-      if (needsConnection(response)) { setIsSetupFlow(true); setStep(response.provider === "codex" ? "codex" : "connection"); setOpen(true) }
+      if (!response.ready) { setIsSetupFlow(needsConnection(response)); setStep(settingsStep(response)); setOpen(true) }
     }).catch(() => {
       if (version === requestVersion.current) {
         setError("Could not load generation settings. Try again.")
@@ -161,6 +164,21 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       setCodex(response)
       if (location) setSavedAppPath(location.appPath)
       setError(response.state === "update_required" ? "" : response.error)
+      if (codexSelected && response.state === "ready" && response.email === settings?.codex?.email) {
+        const latest = await ipc.app.GetGenerationSettings({ refresh: true })
+        if (version !== requestVersion.current) return
+        // The desktop account can also change between the status and model reads.
+        if (latest.codex?.state === "ready" && latest.codex.email !== settings?.codex?.email) {
+          setCodex(latest.codex)
+          onReadyChange(false)
+          return
+        }
+        setSettings(latest)
+        setDraft(savedDraft(latest))
+        setCodex(latest.codex ?? response)
+        setError(latest.error)
+        onReadyChange(latest.ready)
+      }
       return response
     } catch {
       if (version === requestVersion.current) {
@@ -168,7 +186,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
         setError("Could not check the ChatGPT connection. Try again.")
       }
     } finally { if (version === requestVersion.current) setCheckingCodex(false) }
-  }, [])
+  }, [codexSelected, settings?.codex?.email, onReadyChange])
   useEffect(() => {
     if (!open || step !== "codex") return
     setCodex(null)
@@ -226,7 +244,11 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
   }
   const codexAction = async (signInAgain = false) => {
     if (saving || checkingCodex || !codex) return
-    if ((codexConnected && !signInAgain) || codexMissing) { close(); return }
+    if (codexConnected && !signInAgain) {
+      setStep("models")
+      return
+    }
+    if (codexMissing) { close(); return }
     if (codex.state === "waiting") return
     if (codex.state === "error") { await checkCodex(); return }
     setSaving(true)
@@ -237,7 +259,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       } else if (codex.state === "ready" && !signInAgain) {
         const response = await ipc.app.SetGenerationConnection({ connection: "codex" })
         applySettings(response)
-        if (response.ready) { setOpen(false); trigger.current?.focus() }
+        if (!needsConnection(response)) setStep("models")
       } else {
         const response = await ipc.app.StartCodexLogin({})
         setCodex(response)
@@ -273,7 +295,8 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
     : codex?.state === "error" ? "Check that the ChatGPT desktop app opens on this Mac, then try again."
     : "Continue in your browser to sign in with your ChatGPT account."
   const codexActionLabel = checkingCodex || !codex ? "Checking…"
-    : codexConnected ? "Done"
+    : codexConnected ? "Continue"
+    : codexSelected && codex.state === "ready" && settings.error ? "Try again"
     : codex.state === "ready" ? "Use this account"
     : codex.state === "not_installed" ? "Done"
     : codex.state === "update_required" ? "Update ChatGPT"
@@ -299,7 +322,9 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       setDraft(savedDraft(settings))
       setError(settings.error)
       setIsSetupFlow(needsConnection(settings))
-      setStep(settings.provider === "codex" ? "codex" : needsConnection(settings) ? "connection" : "models")
+      const accountChanged = codexSelected && codex &&
+        (codex.state !== "ready" || codex.email !== settings.codex?.email)
+      setStep(accountChanged ? "codex" : settingsStep(settings))
     }
     setOpen(true)
   }
@@ -311,8 +336,17 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
     try {
       const response = await ipc.app.GetGenerationSettings({ refresh: true })
       if (version !== requestVersion.current) return
+      if (response.provider === "codex" && response.codex?.state === "ready" && response.codex.email !== settings?.codex?.email) {
+        // Keep the confirmed account and its draft until Use this account is pressed.
+        setCodex(response.codex)
+        onReadyChange(false)
+        setStep("codex")
+        return
+      }
       setSettings(response)
+      if (response.provider === "codex") setCodex(response.codex ?? null)
       setDraft((latest) => {
+        if (response.codexSelectionId !== settings?.codexSelectionId) return savedDraft(response)
         const model = response.models.find((item) => item.id === latest.model)
         return model ? defaultsFor(model, latest.quality) : savedDraft(response)
       })
@@ -356,7 +390,8 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
     setSaving(true)
     setError("")
     try {
-      const response = await ipc.app.SetGenerationSettings({ provider: settings.provider, ...draft })
+      const response = await ipc.app.SetGenerationSettings({ provider: settings.provider, ...draft,
+        expectedCodexEmail: settings.codex?.email || "", expectedCodexSelectionId: settings.codexSelectionId || "" })
       if (response.error) { setError(response.error); return }
       setSettings({ ...settings, ...draft, error: "", errorCode: "" })
       setOpen(false)
@@ -392,12 +427,12 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       type="button"
       onClick={show}
       disabled={disabled || (loading && !settings)}
-      title={codexSelected || !settings?.ready ? "Generation connection and settings" : "Model and effort"}
+      title={!settings || needsConnection(settings) ? "Generation connection and settings" : codexSelected ? "Model" : "Model and effort"}
       aria-label="Generation settings"
       className="flex items-center gap-1.5 h-8 max-w-56 px-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors disabled:opacity-50"
     >
       <Settings2 className="w-4 h-4 shrink-0" />
-      <span className="truncate text-xs">{settings?.provider === "codex" ? "ChatGPT" : settings && needsConnection(settings) ? "Connect to generate" : current?.name || settings?.model || "Generation settings"}</span>
+      <span className="truncate text-xs">{settings && needsConnection(settings) ? "Connect to generate" : current?.name || settings?.model || "Generation settings"}</span>
     </button>
     {createPortal(
       <dialog
@@ -512,7 +547,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
             </div> : <>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label htmlFor="generation-model" className="text-sm font-medium">{settings && isApiProvider(settings.provider) ? `${apiProviders[settings.provider].name} model` : "Model"}</label>
+                  <label htmlFor="generation-model" className="text-sm font-medium">{codexSelected ? "ChatGPT model" : settings && isApiProvider(settings.provider) ? `${apiProviders[settings.provider].name} model` : "Model"}</label>
                   <button type="button" onClick={refresh} disabled={loading || saving} aria-label="Refresh models" title={loading ? "Loading models…" : "Refresh models"} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50">
                     <RefreshCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
                   </button>
@@ -534,6 +569,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
                 </div>
                 {requiresExtraReference && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Choose a model marked “Extra reference” to use both images. We’ll check its available settings before generating.</p>}
               </div>
+              {codexSelected && <p className="text-xs leading-relaxed text-muted-foreground">Models listed by your ChatGPT desktop app. Image generation remains subject to account access and usage limits.</p>}
               {settings?.provider === "gemini" && <p className="text-xs leading-relaxed text-muted-foreground">Square 1K images, billed through the Gemini API. Checking your key does not confirm available image quota.{draft.model === "gemini-3.1-flash-lite-image" && " Lite is best for quick drafts; choose Nano Banana 2.1 or Pro for repeated refinements."}</p>}
               {!!selected?.qualities.length && <fieldset disabled={loading || saving}>
                 <legend className="text-sm font-medium mb-2">Effort</legend>
@@ -555,6 +591,10 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
                 {canRemoveKey && <button type="button" disabled={saving || loading} onClick={() => { setShowKey(false); setError(""); setStep("remove") }} aria-label="Remove API key" title="Remove API key" className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><Trash2 aria-hidden="true" className="h-4 w-4" /></button>}
                 <button type="button" onClick={() => void ipc.app.OpenExternalUrl({ url: apiProviders[apiProvider].url }).catch(() => {})} className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">Get API key <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" /></button>
               </div>
+              : codexSelected ? <button type="button" disabled={saving || loading} onClick={() => {
+                if (isSetupFlow) { setError(""); setStep("codex") }
+                else chooseConnection()
+              }} className="h-9 px-3 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-50">{isSetupFlow ? "Back" : "Change method"}</button>
               : settings?.apiKeyRequired ? <div className="flex gap-1">
                 <button type="button" disabled={saving} onClick={() => {
                   if (isSetupFlow && modelsBackStep === "connection") { chooseConnection(); return }

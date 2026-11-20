@@ -3,6 +3,7 @@ import { saveConnection } from "./generation-connection";
 import { listImageModels } from "./image-models";
 import { getStoredApiProvider, getResolvedApiKey, hasApiKeyInPrefs } from "./openai-api-key";
 import { readGenerationSettings } from "./read-generation-settings";
+import { readCodexModelSettings } from "./codex-models";
 
 export async function setGenerationConnection(connection: string, generationRunning: boolean) {
   const forced = process.env.ICON_PROVIDER?.trim();
@@ -14,6 +15,7 @@ export async function setGenerationConnection(connection: string, generationRunn
   if (connection === "codex") {
     const status = await getCodexStatus();
     if (status.state !== "ready") throw new Error(status.error || "Connect ChatGPT before continuing.");
+    await readCodexModelSettings(status.email);
     saveConnection("codex");
   } else if (connection === "api") {
     if (!hasApiKeyInPrefs()) throw new Error("Add an API key before continuing.");

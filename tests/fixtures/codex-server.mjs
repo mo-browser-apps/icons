@@ -36,9 +36,22 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (method === "account/read") {
     if (scenario === "old-account" || scenario === "account-error") send({ id, error: { code: scenario === "old-account" ? -32601 : -32000, message: "private server detail" } });
     else reply({ account: scenario === "api" ? { type: "apiKey" } :
-      scenario.startsWith("login") && !existsSync(process.env.MOICONS_TEST_LOG + ".signed-in") ? null : { type: "chatgpt", email: "test@example.com" } });
+      scenario.startsWith("login") && !existsSync(process.env.MOICONS_TEST_LOG + ".signed-in") ? null : {
+        type: "chatgpt", email: process.env.MOICONS_TEST_EMAIL ?? "test@example.com", planType: process.env.MOICONS_TEST_PLAN || "plus" } });
   }
-  if (method === "config/read") reply({ config: { mcp_servers: { test: { enabled: true } } } });
+  if (method === "model/list") {
+    if (scenario === "model-list-error") { send({ id, error: { code: -32000, message: "private server detail" } }); return; }
+    const models = process.env.MOICONS_TEST_MODELS ? JSON.parse(process.env.MOICONS_TEST_MODELS) : [
+      { model: "gpt-6.2-sol", displayName: "GPT-6.2 Sol", isDefault: true, inputModalities: ["text", "image"],
+        defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }] },
+      { model: "gpt-6.2-astra", displayName: "GPT-6.2 Astra", inputModalities: ["text", "image"],
+        defaultReasoningEffort: "medium", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }] },
+    ];
+    const offset = Number(params.cursor || 0);
+    const size = Number(process.env.MOICONS_TEST_PAGE_SIZE || 100);
+    reply({ data: models.slice(offset, offset + size), nextCursor: offset + size < models.length ? String(offset + size) : null });
+  }
+  if (method === "config/read") reply({ config: { model: "unavailable-model", model_reasoning_effort: "xhigh", service_tier: "priority", mcp_servers: { test: { enabled: true } } } });
   if (method === "thread/start") reply({ thread: { id: `thread-${++threads}` } });
   if (method === "turn/start") {
     const turnId = `turn-${threads}`;
