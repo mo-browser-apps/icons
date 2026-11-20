@@ -36,6 +36,8 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
   const imageSettings = load(fileURLToPath(new URL("../src/main/lib/generation-settings.ts", import.meta.url)));
   const connectionHandler = load(fileURLToPath(new URL("../src/main/lib/set-generation-connection.ts", import.meta.url)));
   const account = load(fileURLToPath(new URL("../src/main/lib/codex-account.ts", import.meta.url)));
+  const codexModels = load(fileURLToPath(new URL("../src/main/lib/codex-models.ts", import.meta.url)));
+  codexModels.readCodexModelSettings = async () => ({ model: "gpt-6.2-sol", models: [{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol", qualities: [], maxReferenceImages: 0 }] });
   return {
     save: apiKeys.saveValidatedApiKey,
     remove: apiKeys.removeStoredApiKey,
@@ -45,7 +47,7 @@ function subject(fetch, initial = { [keyPref]: "previous-key" }, persist = true,
     readSettings: settings.readGenerationSettings,
     saveImageSettings: imageSettings.saveImageSettings,
     setConnection: (connection, running = false) => connectionHandler.setGenerationConnection(connection, running),
-    account,
+    account, codexModels,
     values, writes: () => writes,
   };
 }
@@ -89,6 +91,21 @@ test("other forced providers still reject connection changes", async () => {
     for (const connection of ["codex", "api", "none"]) await assert.rejects(app.setConnection(connection), /provider is fixed/);
     assert.equal(app.writes(), 0);
   }
+});
+
+test("ChatGPT catalog failures prevent readiness and preserve the previous connection", async () => {
+  const app = subject(async () => catalog());
+  app.account.getCodexStatus = async () => ({ state: "ready", email: "test@example.com", error: "" });
+  app.codexModels.readCodexModelSettings = async () => { throw new Error("Could not load ChatGPT models."); };
+  await assert.rejects(app.setConnection("codex"), /Could not load ChatGPT models/);
+  assert.equal(app.provider(), "openai");
+  assert.equal(app.writes(), 0);
+  app.useConnection("codex");
+  const result = await app.readSettings();
+  assert.equal(result.ready, false);
+  assert.equal(result.codex.state, "ready");
+  assert.equal(result.errorCode, "codex_models");
+  assert.equal(result.models.length, 0);
 });
 
 test("connection changes validate the selected method and refuse disconnect during generation", async () => {

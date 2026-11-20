@@ -161,6 +161,15 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       setCodex(response)
       if (location) setSavedAppPath(location.appPath)
       setError(response.state === "update_required" ? "" : response.error)
+      if (codexSelected && response.state === "ready" && response.email === settings?.codex?.email) {
+        const latest = await ipc.app.GetGenerationSettings({ refresh: true })
+        if (version !== requestVersion.current) return
+        setSettings(latest)
+        setDraft(savedDraft(latest))
+        setCodex(latest.codex ?? response)
+        setError(latest.error)
+        onReadyChange(latest.ready)
+      }
       return response
     } catch {
       if (version === requestVersion.current) {
@@ -168,7 +177,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
         setError("Could not check the ChatGPT connection. Try again.")
       }
     } finally { if (version === requestVersion.current) setCheckingCodex(false) }
-  }, [])
+  }, [codexSelected, settings?.codex?.email, onReadyChange])
   useEffect(() => {
     if (!open || step !== "codex") return
     setCodex(null)
@@ -226,7 +235,12 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
   }
   const codexAction = async (signInAgain = false) => {
     if (saving || checkingCodex || !codex) return
-    if ((codexConnected && !signInAgain) || codexMissing) { close(); return }
+    if (codexConnected && !signInAgain) {
+      if (draft.model === settings.model) close()
+      else await save()
+      return
+    }
+    if (codexMissing) { close(); return }
     if (codex.state === "waiting") return
     if (codex.state === "error") { await checkCodex(); return }
     setSaving(true)
@@ -274,6 +288,7 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
     : "Continue in your browser to sign in with your ChatGPT account."
   const codexActionLabel = checkingCodex || !codex ? "Checking…"
     : codexConnected ? "Done"
+    : codexSelected && codex.state === "ready" && settings.error ? "Try again"
     : codex.state === "ready" ? "Use this account"
     : codex.state === "not_installed" ? "Done"
     : codex.state === "update_required" ? "Update ChatGPT"
@@ -312,7 +327,9 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
       const response = await ipc.app.GetGenerationSettings({ refresh: true })
       if (version !== requestVersion.current) return
       setSettings(response)
+      if (response.provider === "codex") setCodex(response.codex ?? null)
       setDraft((latest) => {
+        if (response.codex?.email !== settings?.codex?.email) return savedDraft(response)
         const model = response.models.find((item) => item.id === latest.model)
         return model ? defaultsFor(model, latest.quality) : savedDraft(response)
       })
@@ -356,7 +373,8 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
     setSaving(true)
     setError("")
     try {
-      const response = await ipc.app.SetGenerationSettings({ provider: settings.provider, ...draft })
+      const response = await ipc.app.SetGenerationSettings({ provider: settings.provider, ...draft,
+        expectedCodexEmail: settings.codex?.email || "" })
       if (response.error) { setError(response.error); return }
       setSettings({ ...settings, ...draft, error: "", errorCode: "" })
       setOpen(false)
@@ -470,6 +488,24 @@ export function GenerationSettings({ disabled, connectionRequest, modelRequest =
                   <button type="button" disabled={saving || checkingCodex || codex?.state === "waiting"} onClick={() => void chooseAppLocation(true)} aria-label="Use automatic detection" title="Use automatic detection" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"><X aria-hidden="true" className="h-3.5 w-3.5" /></button>
                 </div>}
               </div>
+              {codexSelected && codex?.state === "ready" && codex.email === settings.codex?.email && <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label htmlFor="chatgpt-model" className="text-sm font-medium">ChatGPT model</label>
+                  <button type="button" onClick={refresh} disabled={loading || saving || checkingCodex} aria-label="Refresh ChatGPT models" title="Refresh models" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50">
+                    <RefreshCw aria-hidden="true" className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+                <div className="relative">
+                  <select id="chatgpt-model" value={draft.model} disabled={loading || saving || checkingCodex || !settings.models.length}
+                    onChange={(event) => { setDraft({ model: event.target.value, quality: "" }); setError("") }}
+                    className="h-10 w-full appearance-none rounded-lg border border-border bg-secondary pl-3 pr-10 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-50">
+                    {!selected && <option value={draft.model} disabled>{loading || checkingCodex ? "Loading models…" : "No models found"}</option>}
+                    {settings.models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
+                  </select>
+                  <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Models listed by your ChatGPT desktop app. Image generation remains subject to account access and usage limits.</p>
+              </div>}
               <p className="text-xs leading-relaxed text-muted-foreground">Generation uses your plan’s allowance and available credits. Usage starts when you press Generate.</p>
               {!codexMissing && <div className="flex items-center gap-4 text-xs">
                 {codex?.state === "ready" && <button type="button" disabled={saving || checkingCodex} onClick={() => void codexAction(true)} className="text-muted-foreground underline underline-offset-4 hover:text-foreground disabled:opacity-40">Sign in again</button>}

@@ -201,6 +201,8 @@ message SetGenerationSettingsRequest {
   string provider = 1;
   string model = 2;
   string quality = 3;
+  // Prevent saving a model to a different account if sign-in changes while editing.
+  string expected_codex_email = 4;
 }
 
 message SetGenerationSettingsResponse {

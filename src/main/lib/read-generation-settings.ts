@@ -1,6 +1,7 @@
 import { resolveProviderName } from "./image-provider";
 import { getImageSettings } from "./generation-settings";
 import { getCodexStatus } from "./codex-account";
+import { readCodexModelSettings } from "./codex-models";
 import { isConnectionDisconnected } from "./generation-connection";
 import { listImageModels, ProviderRequestError } from "./image-models";
 import { getResolvedApiKey, hasApiKeyInPrefs } from "./openai-api-key";
@@ -14,8 +15,13 @@ export async function readGenerationSettings(refresh = false): Promise<GetGenera
   const provider = resolveProviderName();
   if (provider === "codex") {
     const codex = await getCodexStatus();
-    return { provider, model: "", quality: "", models: [], hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: false,
+    const base = { provider, model: "", quality: "", models: [], hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: false,
       ready: codex.state === "ready", codex, error: codex.error, errorCode: codex.state === "ready" ? "" : "codex_connection" };
+    if (!base.ready) return base;
+    try { return { ...base, ...await readCodexModelSettings(codex.email) }; }
+    catch (error) {
+      return { ...base, ready: false, error: error instanceof Error ? error.message : "Could not load ChatGPT models. Try again.", errorCode: "codex_models" };
+    }
   }
   const base = { provider, ...getImageSettings(provider), hasApiKey: hasApiKeyInPrefs(), apiKeyRequired: provider !== "mock", codex: undefined };
   if (base.apiKeyRequired && !base.hasApiKey) return { ...base, ready: false, models: [], error: "", errorCode: "" };
