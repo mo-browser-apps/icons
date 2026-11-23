@@ -56,7 +56,7 @@
     "tailwindcss": "^4.1.4",
     "ts-proto": "^2.10.1",
     "typescript": "^5.8.3",
-    "vite": "^8.0.0"
+    "vite": "^8.3.8"
   },
   "allowScripts": {
     "@mobrowser/sdk-darwin-arm64@2.20.1": true,
