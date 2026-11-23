@@ -1,0 +1,73 @@
+name: MoControl MōBrowser Update
+run-name: Update MōBrowser to ${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: MōBrowser version
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mocontrol-mobrowser-update-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  update:
+    name: Open pull request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      VERSION: ${{ inputs.version }}
+      BRANCH: mocontrol/mobrowser-${{ inputs.version }}
+      BASE: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Set every @mobrowser package to the version
+        run: |
+          node --input-type=module <<'EOF'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const version = process.env.VERSION;
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) throw new Error('Invalid version');
+          const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
+          for (const group of ['dependencies', 'devDependencies', 'optionalDependencies'])
+            for (const name of Object.keys(manifest[group] ?? {}))
+              if (name.startsWith('@mobrowser/')) manifest[group][name] = version;
+          // allowScripts keys name exact versions of the SDK packages.
+          if (manifest.allowScripts)
+            manifest.allowScripts = Object.fromEntries(
+              Object.entries(manifest.allowScripts).map(([key, value]) => [
+                key.startsWith('@mobrowser/') ? key.replace(/@[^@/]+$/, `@${version}`) : key,
+                value,
+              ]),
+            );
+          writeFileSync('package.json', `${JSON.stringify(manifest, null, 2)}\n`);
+          EOF
+      # Rewrites the lockfile only: no package code runs while this job holds a write token.
+      - run: npm install --package-lock-only --ignore-scripts
+      - name: Push branch
+        run: |
+          # A second run for the version reuses the branch, so its pull request still opens.
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add package.json package-lock.json
+          git commit -m "Update MōBrowser to $VERSION"
+          git push origin "HEAD:refs/heads/$BRANCH"
+      - name: Open pull request
+        run: |
+          body="Updates every @mobrowser package to $VERSION. Build the app before merging: API changes may need code changes."
+          if url=$(gh pr create --base "$BASE" --head "$BRANCH" --title "Update MōBrowser to $VERSION" --body "$body"); then
+            echo "**Pull request:** $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            # Repositories can refuse pull requests from Actions; the branch is ready for one by hand.
+            echo "**Open the pull request:** $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$BASE...$BRANCH?expand=1" >> "$GITHUB_STEP_SUMMARY"
+          fi
