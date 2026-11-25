@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { appendFile, readFile, writeFile, readdir, stat, mkdir, rm } from 'node:fs/promises';
+import {
+  appendFile,
+  readFile,
+  writeFile,
+  readdir,
+  stat,
+  mkdir,
+  rm,
+  copyFile,
+} from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -216,7 +225,7 @@ if (command === 'register') {
   await call('progress', { state: 'signing' });
 } else if (command === 'verified') {
   await call('progress', { state: 'signing', signingVerified: true });
-} else if (command === 'publish') {
+} else if (command === 'upload') {
   await stage({ failureStage: 'publish' });
   const directory = `build/dist/${platform === 'macos' ? 'mac' : 'win'}-${architecture}/pack`;
   const extension = platform === 'macos' ? 'dmg' : 'exe';
@@ -245,7 +254,8 @@ if (command === 'register') {
           })),
       )
     : null;
-  const fields = updates ? { artifact, updates } : { artifact };
+  // Sent now, so the publish job needs none of this runner's files.
+  const fields = updates ? { artifact, updates, feed } : { artifact };
   const upload = await call('upload', fields);
   await put(upload, file, artifact.size);
   // Each upload call re-signs the URLs, so a slow installer upload can't expire the next one.
@@ -254,10 +264,20 @@ if (command === 'register') {
     const target = targets.find((value) => value.filename === update.filename);
     await put(target, `${releasesDir}/${update.filename}`, update.size);
   }
+  // release.yml keeps this copy, under the published name, for the GitHub Release.
+  const kept = `${env.RUNNER_TEMP}/mocontrol-installer`;
+  await mkdir(kept, { recursive: true });
+  await copyFile(file, `${kept}/${artifact.filename}`);
+  if (env.GITHUB_OUTPUT)
+    await appendFile(env.GITHUB_OUTPUT, `installer=${kept}/${artifact.filename}\n`);
+  await summary(
+    `uploaded \`${artifact.filename}\` (${(artifact.size / 1e6).toFixed(1)} MB); it publishes once every installer uploads.`,
+  );
+} else if (command === 'publish') {
   let published;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      published = await call('finalize', feed ? { feed } : {});
+      published = await call('finalize');
       break;
     } catch {
       if (attempt === 3) throw new Error('Publication pending; check MoControl');
@@ -266,10 +286,7 @@ if (command === 'register') {
   }
   if (published?.state !== 'published') throw new Error('Publication is not confirmed');
   console.log('Installer published.');
-  // release.yml attaches this file to the GitHub Release under the published name.
-  if (env.GITHUB_OUTPUT)
-    await appendFile(env.GITHUB_OUTPUT, `installer=${file}\nfilename=${artifact.filename}\n`);
-  await summary(`published \`${artifact.filename}\` (${(artifact.size / 1e6).toFixed(1)} MB).`);
+  await summary('published.');
 } else if (command === 'failed' || command === 'cancelled') {
   const { unreserved, failureStage = 'setup' } = await readStage();
   if (!unreserved) {
