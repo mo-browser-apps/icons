@@ -54,8 +54,7 @@ jobs:
     runs-on: ${{ matrix.target == 'windows' && 'windows-2022' || 'macos-15' }}
     timeout-minutes: 60
     permissions:
-      # Creating the GitHub Release needs write access.
-      contents: write
+      contents: read
       id-token: write
     defaults:
       run:
@@ -176,38 +175,81 @@ jobs:
           $unsigned = $files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' }
           if ($unsigned) { throw "Unsigned files: $($unsigned.FullName -join ', ')" }
           node .mocontrol/release.mjs verified
-      - name: Publish installer
-        id: publish
-        run: node .mocontrol/release.mjs publish
-      # The bucket holds the release, so a failure here leaves it published.
-      - name: Attach installer to GitHub Release
-        if: steps.publish.outputs.installer
+      - name: Upload installer
+        id: upload
+        run: node .mocontrol/release.mjs upload
+      # Kept for the publish job to attach to the GitHub Release, which is optional.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         continue-on-error: true
-        timeout-minutes: 10
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          INSTALLER: ${{ steps.publish.outputs.installer }}
-          ASSET: ${{ steps.publish.outputs.filename }}
-        run: |
-          tag="v$RELEASE_VERSION"
-          # Checked first: creating a release on an existing tag ignores --target. `refs/tags/` also resolves annotated tags.
-          if at="$(gh api "repos/$GH_REPO/commits/refs/tags/$tag" --jq .sha 2> /dev/null)" && [ "$at" != "$RELEASE_SOURCE_COMMIT" ]; then
-            echo "::warning::Tag $tag is not at the released commit, so the installer was not attached to its GitHub Release."
-            exit 0
-          fi
-          # Another target's job may create the release first. Notes go through stdin: Git Bash rewrites an argument that starts with a slash.
-          # GitHub's generated notes follow them: a release without text shows the tagged commit's message.
-          gh release view "$tag" > /dev/null 2>&1 ||
-            gh release create "$tag" --target "$RELEASE_SOURCE_COMMIT" --title "$RELEASE_VERSION" --generate-notes --notes-file - <<< "$RELEASE_NOTES" ||
-            gh release view "$tag" > /dev/null
-          if [ -z "$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$ASSET\") | .name")" ]; then
-            cp "$INSTALLER" "$RUNNER_TEMP/$ASSET"
-            gh release upload "$tag" "$RUNNER_TEMP/$ASSET"
-          fi
+        with:
+          name: installer-${{ matrix.target }}
+          path: ${{ steps.upload.outputs.installer }}
+          retention-days: 1
       - name: Record failure
         if: failure()
         run: node .mocontrol/release.mjs failed
       - name: Record cancellation
         if: cancelled()
         run: node .mocontrol/release.mjs cancelled
+  # Runs only when every installer uploaded, so all platforms publish the version or none does.
+  publish:
+    name: Publish installers
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Creating the GitHub Release needs write access.
+      contents: write
+      id-token: write
+    env:
+      RELEASE_TARGETS: ${{ join(fromJSON(inputs.targets || inputs.platforms), ' ') }}
+      RELEASE_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_NOTES: ${{ inputs.release_notes }}
+      RELEASE_DISPATCH_ID: ${{ inputs.dispatch_id }}
+      MOCONTROL_RELEASE_URL: ${{ vars.MOCONTROL_RELEASE_URL }}
+      MOCONTROL_ORGANIZATION_ID: ${{ vars.MOCONTROL_ORGANIZATION_ID }}
+      MOCONTROL_APP_ID: ${{ vars.MOCONTROL_APP_ID }}
+      MOCONTROL_RELEASE_TOKEN: ${{ secrets.MOCONTROL_RELEASE_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+          sparse-checkout: .mocontrol
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      # Stops at the first failure; distribution finishes a publication it already started.
+      - name: Publish installers
+        run: |
+          for target in $RELEASE_TARGETS; do
+            RELEASE_TARGET="$target" node .mocontrol/release.mjs publish
+          done
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        id: installers
+        continue-on-error: true
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/installers
+      # The bucket holds the release, so a failure here leaves it published.
+      - name: Attach installers to GitHub Release
+        if: steps.installers.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          INSTALLERS: ${{ runner.temp }}/installers
+        run: |
+          tag="v$RELEASE_VERSION"
+          # Checked first: creating a release on an existing tag ignores --target. `refs/tags/` also resolves annotated tags.
+          if at="$(gh api "repos/$GH_REPO/commits/refs/tags/$tag" --jq .sha 2> /dev/null)" && [ "$at" != "$RELEASE_SOURCE_COMMIT" ]; then
+            echo "::warning::Tag $tag is not at the released commit, so the installers were not attached to its GitHub Release."
+            exit 0
+          fi
+          # GitHub's generated notes follow the notes: a release without text shows the tagged commit's message.
+          gh release view "$tag" > /dev/null 2>&1 ||
+            gh release create "$tag" --target "$RELEASE_SOURCE_COMMIT" --title "$RELEASE_VERSION" --generate-notes --notes-file - <<< "$RELEASE_NOTES"
+          gh release upload "$tag" "$INSTALLERS"/* --clobber
